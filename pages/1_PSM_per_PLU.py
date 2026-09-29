@@ -11,6 +11,7 @@ from utils.common import (
     get_struk_text, build_plu_name_dict,
 )
 from utils.plu_dict import get_nama_plu, get_plu_normalized
+from utils.plu_dict import get_nama_plu, get_plu_normalized
 
 st.set_page_config(
     page_title="PSM per PLU",
@@ -105,8 +106,9 @@ try:
 
     df_psm_detail["bill_str"] = df_psm_detail["bill_no"].astype(str).str.strip()
 
-    with st.spinner("Membangun kamus nama item dari struk..."):
-        plu_name_dict = build_plu_name_dict(df_receipt, df_detail)
+    plu_name_dict = build_plu_name_dict()
+
+    st.success("Berhasil load " + str(len(plu_name_dict)) + " PLU dari dictionary.")
 
     st.success("Berhasil mapping " + str(len(plu_name_dict)) + " PLU ke nama.")
 
@@ -114,19 +116,18 @@ try:
     agg_rows = []
     for plu, grp in df_psm_detail.groupby("plu_norm_int"):
         plu_int = int(plu)
+        plu_asli = grp["plu"].iloc[0]
         qty = grp["qty"].sum()
         sales = (grp["price"] * grp["qty"]).sum()
         list_bon = sorted(
             set(grp["bill_str"].unique()),
             key=lambda x: int(x) if x.isdigit() else 0
         )
-        nama = plu_name_dict.get(plu_int, "-")
-        if nama == "-":
-            plu_asli = grp["plu"].iloc[0]
-            nama = plu_name_dict.get(plu_asli, "-")
-
+        nama = get_nama_plu(plu_asli)
+        plu_display = get_plu_normalized(plu_asli) or plu_int
+    
         agg_rows.append({
-            "PLU": plu_int,
+            "PLU": plu_display,
             "Nama_Item": nama,
             "Qty": int(qty),
             "Sales_Item": sales,
