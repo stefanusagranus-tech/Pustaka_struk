@@ -155,7 +155,7 @@ try:
 
     st.success("Berhasil load " + str(len(plu_name_dict)) + " PLU dari dictionary.")
 
-     st.info(
+    st.info(
         "Ditemukan " + str(best_count) + " baris item dengan PLU SG."
     )
 
