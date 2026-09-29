@@ -471,7 +471,7 @@ PLU_NAMES = {
     428818: "PANTENE COND MRC COLLAGEN 150ML",
     453458: "PANTENE SHP MRCL COLLAGEN 145ML",
     453459: "PANTENE SHP MRCL BIOTIN 145ML",
-}
+
     # ============================================================
     # GRUP 37: PLU SUGER (Tebus Murah)
     # ============================================================
