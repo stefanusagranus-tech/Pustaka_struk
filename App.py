@@ -4,7 +4,7 @@ import os
 import shutil
 from utils.common import extract_zip_and_find_db
 from utils.common import load_tables
-from utils.common import build_kasir_dict
+from utils.common import build_kasir_dict_from_receipt
 
 st.set_page_config(
     page_title="Dashboard POS",
@@ -62,7 +62,7 @@ def get_data(db_path):
         "tx_tsale",
         "tx_tsale_card",
         "tx_trans",
-        "log_connection",
+        "log_receipt_prn",
     ]
     dfs = load_tables(db_path, tables)
     return dfs
@@ -72,7 +72,7 @@ try:
     dfs = get_data(st.session_state["db_path"])
     df_sale = dfs.get("tx_tsale", pd.DataFrame())
     df_card = dfs.get("tx_tsale_card", pd.DataFrame())
-    df_connection = dfs.get("log_connection", pd.DataFrame())
+    df_receipt = dfs.get("log_receipt_prn", pd.DataFrame())
 except Exception as e:
     st.error("Gagal load database: " + str(e))
     st.stop()
@@ -81,8 +81,8 @@ if df_sale.empty:
     st.error("Tabel tx_tsale kosong atau tidak ditemukan.")
     st.stop()
 
-# Bangun dictionary NIK -> Nama Kasir
-kasir_dict = build_kasir_dict(df_connection)
+# Bangun dictionary NIK -> Nama Kasir dari log_receipt_prn
+kasir_dict = build_kasir_dict_from_receipt(df_receipt)
 
 # ============================================================
 # PREPARE DATA
@@ -452,7 +452,7 @@ if "user_id" in df.columns:
         "E_Wallet": "E-Wallet",
     })
 
-    st.caption("Terdeteksi " + str(len(kasir_dict)) + " kasir dari log_connection.")
+    st.caption("Terdeteksi " + str(len(kasir_dict)) + " kasir dari log_receipt_prn.")
     st.dataframe(rekap_display, use_container_width=True, hide_index=True)
 
     total_row = pd.DataFrame([{
@@ -497,10 +497,10 @@ st.markdown(
 with st.expander("🔍 Debug"):
     st.write("Total baris tx_tsale: " + str(len(df_sale)))
     st.write("Total baris tx_tsale_card: " + str(len(df_card)))
-    st.write("Total baris log_connection: " + str(len(df_connection)))
+    st.write("Total baris log_receipt_prn: " + str(len(df_receipt)))
     st.write("Jumlah kasir di kasir_dict: " + str(len(kasir_dict)))
     st.write("Contoh kasir_dict: ", dict(list(kasir_dict.items())[:5]))
     st.write("Rentang tanggal: " + str(tgl_range))
     st.write("Kolom tx_tsale: ", df_sale.columns.tolist())
     st.write("Kolom tx_tsale_card: ", df_card.columns.tolist() if not df_card.empty else "kosong")
-    st.write("Kolom log_connection: ", df_connection.columns.tolist() if not df_connection.empty else "kosong")
+    st.write("Kolom log_receipt_prn: ", df_receipt.columns.tolist() if not df_receipt.empty else "kosong")
