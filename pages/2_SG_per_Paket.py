@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from utils.common import (
-    setup_upload, load_tables,
+    load_tables, detect_best_plu_mode, normalize_plu_series,
     render_struk_html, generate_pdf, render_print_button,
     get_struk_text, build_plu_name_dict,
 )
@@ -20,9 +20,6 @@ st.set_page_config(
 st.title("🎁 Laporan Serba Gratis (SG) per Paket")
 st.markdown("Menampilkan paket Serba Gratis yang sudah memenuhi syarat penjualan.")
 
-# ============================================================
-# DEFINISI GRUP SG  (silakan rapihin / tambah sesuai juklak)
-# ============================================================
 SG_GROUPS = {
     "wow_spageti": {
         "plu": [444755, 444756, 448657, 461599],
@@ -122,7 +119,6 @@ SG_GROUPS = {
     },
 }
 
-# Bangun mapping PLU -> grup
 PLU_TO_GROUP = {}
 for grp_key, grp_data in SG_GROUPS.items():
     for plu in grp_data["plu"]:
@@ -130,347 +126,327 @@ for grp_key, grp_data in SG_GROUPS.items():
 
 ALL_PLU_SG = set(PLU_TO_GROUP.keys())
 
-
 # ============================================================
-# UPLOAD
+# AMBIL DB DARI SESSION STATE
 # ============================================================
-db_file = setup_upload()
+db_file = st.session_state.get("db_path", None)
 
+if not db_file:
+    st.warning("Belum ada database. Buka halaman Home dulu untuk upload ZIP.")
+    st.stop()
+
+st.success("Database: " + st.session_state.get("db_name", ""))
 
 # ============================================================
 # MAIN
 # ============================================================
-if db_file and os.path.exists(db_file):
-    try:
-        dfs = load_tables(db_file, ["tx_tsale", "tx_trans", "log_receipt_prn"])
-        df_sale = dfs["tx_tsale"]
-        df_detail = dfs["tx_trans"]
-        df_receipt = dfs["log_receipt_prn"]
+try:
+    dfs = load_tables(db_file, ["tx_tsale", "tx_trans", "log_receipt_prn"])
+    df_sale = dfs["tx_tsale"]
+    df_detail = dfs["tx_trans"]
+    df_receipt = dfs["log_receipt_prn"]
 
-        if df_detail.empty:
-            st.error("Tabel tx_trans kosong.")
-            st.stop()
+    if df_detail.empty:
+        st.error("Tabel tx_trans kosong.")
+        st.stop()
 
-        # ---- Konversi numerik ----
-        df_detail["plu_num"] = pd.to_numeric(df_detail["plu"], errors="coerce")
-        for c in ["qty", "price"]:
-            if c in df_detail.columns:
-                df_detail[c] = pd.to_numeric(
-                    df_detail[c], errors="coerce"
-                ).fillna(0)
+    # Auto-detect PLU
+    with st.spinner("Mendeteksi format PLU di database..."):
+        best_mode, best_count, df_sg_all = detect_best_plu_mode(
+            df_detail, ALL_PLU_SG
+        )
 
-        # ---- Filter item SG ----
-        df_sg_all = df_detail[df_detail["plu_num"].isin(ALL_PLU_SG)].copy()
+    st.info(
+        "Mode PLU terbaik: " + best_mode
+        + " — ditemukan " + str(best_count) + " baris item dengan PLU SG."
+    )
 
-        st.info("Ditemukan " + str(len(df_sg_all)) + " baris item dengan PLU SG.")
+    with st.expander("Debug: Cek Format PLU", expanded=(best_count == 0)):
+        st.write("PLU di database (20 contoh):")
+        plu_sample = pd.to_numeric(df_detail["plu"], errors="coerce").dropna().astype(int).unique()
+        st.write(sorted(list(plu_sample))[:20])
 
-        if df_sg_all.empty:
-            st.warning("Tidak ada item dengan PLU SG di database.")
-            st.stop()
+        st.write("PLU SG (20 contoh):")
+        st.write(sorted(list(ALL_PLU_SG))[:20])
 
-        # ---- Tambah kolom grup ----
-        df_sg_all["grup"] = df_sg_all["plu_num"].map(PLU_TO_GROUP)
-        df_sg_all["bill_str"] = df_sg_all["bill_no"].astype(str).str.strip()
+        st.write("---")
+        st.write("Hasil coba semua mode:")
+        modes = ["asli", "buang_1", "buang_2", "div_10", "div_100"]
+        hasil = []
+        for mode in modes:
+            df_temp = df_detail.copy()
+            df_temp["plu_norm"] = normalize_plu_series(df_temp["plu"], mode)
+            df_temp["plu_norm_int"] = df_temp["plu_norm"].round().astype("Int64")
+            cnt = int(df_temp["plu_norm_int"].isin(ALL_PLU_SG).sum())
+            hasil.append({"mode": mode, "jumlah_match": cnt})
+        st.dataframe(pd.DataFrame(hasil), use_container_width=True)
 
-        # ---- Bangun kamus PLU -> nama ----
-        with st.spinner("Membangun kamus nama item dari struk..."):
-            plu_name_dict = build_plu_name_dict(df_receipt, df_detail)
+    if best_count == 0:
+        st.warning("Tidak ada PLU SG yang match.")
+        st.stop()
 
-        st.success("Berhasil mapping " + str(len(plu_name_dict)) + " PLU ke nama.")
+    for c in ["qty", "price"]:
+        if c in df_sg_all.columns:
+            df_sg_all[c] = pd.to_numeric(
+                df_sg_all[c], errors="coerce"
+            ).fillna(0)
 
-        # ============================================================
-        # HITUNG PAKET SG PER STRUK PER GRUP
-        # ============================================================
-        paket_rows = []
+    df_sg_all["grup"] = df_sg_all["plu_norm_int"].map(PLU_TO_GROUP)
+    df_sg_all["bill_str"] = df_sg_all["bill_no"].astype(str).str.strip()
 
-        for (bill, grup_key), grp in df_sg_all.groupby(["bill_str", "grup"]):
-            grp_info = SG_GROUPS.get(grup_key)
-            if grp_info is None:
-                continue
+    with st.spinner("Membangun kamus nama item dari struk..."):
+        plu_name_dict = build_plu_name_dict(df_receipt, df_detail)
 
-            syarat_qty = grp_info["syarat_qty"]
-            beli_qty = grp_info["beli_qty"]
-            nama_grup = grp_info["nama"]
+    st.success("Berhasil mapping " + str(len(plu_name_dict)) + " PLU ke nama.")
 
-            total_qty = grp["qty"].sum()
-            total_sales = (grp["price"] * grp["qty"]).sum()
+    # Hitung paket
+    paket_rows = []
+    for (bill, grup_key), grp in df_sg_all.groupby(["bill_str", "grup"]):
+        grp_info = SG_GROUPS.get(grup_key)
+        if grp_info is None:
+            continue
 
-            # Hitung jumlah paket
-            jumlah_paket = int(total_qty // syarat_qty)
-            if jumlah_paket == 0:
-                continue  # belum memenuhi syarat
+        syarat_qty = grp_info["syarat_qty"]
+        beli_qty = grp_info["beli_qty"]
+        nama_grup = grp_info["nama"]
 
-            # Rasio yang dibayar = beli_qty / syarat_qty
-            rasio_bayar = beli_qty / syarat_qty
+        total_qty = grp["qty"].sum()
+        total_sales = (grp["price"] * grp["qty"]).sum()
 
-            sales_per_paket = total_sales / jumlah_paket
-            sales_bayar_per_paket = sales_per_paket * rasio_bayar
-            qty_per_paket = int(total_qty // jumlah_paket)
+        jumlah_paket = int(total_qty // syarat_qty)
+        if jumlah_paket == 0:
+            continue
 
-            # Ambil daftar PLU yang ada di grup ini
-            list_plu_di_struk = sorted(grp["plu_num"].unique().astype(int).tolist())
+        rasio_bayar = beli_qty / syarat_qty
+        sales_per_paket = total_sales / jumlah_paket
+        sales_bayar_per_paket = sales_per_paket * rasio_bayar
+        qty_per_paket = int(total_qty // jumlah_paket)
 
-            # Ambil nama produk (dari mapping) — gabung beberapa nama
-            nama_items = []
-            for plu in list_plu_di_struk:
-                nm = plu_name_dict.get(plu, "-")
-                if nm != "-":
-                    nama_items.append(nm)
-            nama_items_str = " + ".join(nama_items[:3])
-            if len(nama_items) > 3:
-                nama_items_str += " + ..."
+        list_plu_di_struk = sorted(grp["plu_norm_int"].unique().astype(int).tolist())
 
-            # Buat 1 baris per paket
-            for p in range(1, jumlah_paket + 1):
-                paket_rows.append({
-                    "Faktur": bill,
-                    "Grup": grup_key,
-                    "Nama_Grup": nama_grup,
-                    "PLU": list_plu_di_struk,
-                    "Nama_Item": nama_items_str,
-                    "Qty_Total_Struk": int(total_qty),
-                    "Syarat_Qty": syarat_qty,
-                    "Jumlah_Paket": jumlah_paket,
-                    "Paket_Ke": p,
-                    "Qty_Paket": qty_per_paket,
-                    "Sales_Paket": sales_bayar_per_paket,
-                })
+        nama_items = []
+        for plu in list_plu_di_struk:
+            nm = plu_name_dict.get(plu, "-")
+            if nm != "-":
+                nama_items.append(nm)
+        nama_items_str = " + ".join(nama_items[:3])
+        if len(nama_items) > 3:
+            nama_items_str += " + ..."
 
-        df_paket = pd.DataFrame(paket_rows)
+        for p in range(1, jumlah_paket + 1):
+            paket_rows.append({
+                "Faktur": bill,
+                "Grup": grup_key,
+                "Nama_Grup": nama_grup,
+                "PLU": list_plu_di_struk,
+                "Nama_Item": nama_items_str,
+                "Qty_Total_Struk": int(total_qty),
+                "Syarat_Qty": syarat_qty,
+                "Jumlah_Paket": jumlah_paket,
+                "Paket_Ke": p,
+                "Qty_Paket": qty_per_paket,
+                "Sales_Paket": sales_bayar_per_paket,
+            })
 
-        if df_paket.empty:
-            st.warning("Tidak ada paket SG yang memenuhi syarat.")
-            st.stop()
+    df_paket = pd.DataFrame(paket_rows)
 
-        # Tambah tanggal dari tx_tsale (via faktur -> bill_no)
-        # Kita pakai kolom tanggal di log_receipt_prn kalau ada
-        if not df_receipt.empty and "bill_no" in df_receipt.columns:
-            df_receipt["_bill_z"] = (
-                df_receipt["bill_no"].astype(str).str.strip().str.zfill(4)
+    if df_paket.empty:
+        st.warning("Tidak ada paket SG yang memenuhi syarat.")
+        st.stop()
+
+    # Tambah tanggal
+    if not df_receipt.empty and "bill_no" in df_receipt.columns:
+        df_receipt["_bill_z"] = (
+            df_receipt["bill_no"].astype(str).str.strip().str.zfill(4)
+        )
+        if "date_tx" in df_receipt.columns:
+            bill_to_date = {}
+            for _, r in df_receipt.iterrows():
+                b = str(r["bill_no"]).strip().zfill(4)
+                bill_to_date[b] = r.get("date_tx", "")
+            df_paket["Tanggal"] = df_paket["Faktur"].apply(
+                lambda x: bill_to_date.get(str(x).zfill(4), "")
             )
-            # Buat mapping bill -> date
-            if "date_tx" in df_receipt.columns:
-                bill_to_date = {}
-                for _, r in df_receipt.iterrows():
-                    b = str(r["bill_no"]).strip().zfill(4)
-                    bill_to_date[b] = r.get("date_tx", "")
-                df_paket["Tanggal"] = df_paket["Faktur"].apply(
-                    lambda x: bill_to_date.get(str(x).zfill(4), "")
-                )
-            else:
-                df_paket["Tanggal"] = ""
         else:
             df_paket["Tanggal"] = ""
+    else:
+        df_paket["Tanggal"] = ""
 
-        df_paket = df_paket.sort_values(
-            ["Tanggal", "Faktur", "Grup", "Paket_Ke"]
-        ).reset_index(drop=True)
+    df_paket = df_paket.sort_values(
+        ["Tanggal", "Faktur", "Grup", "Paket_Ke"]
+    ).reset_index(drop=True)
 
-        # ============================================================
-        # RINGKASAN
-        # ============================================================
-        st.markdown("### Tabel Paket Serba Gratis")
+    st.markdown("### Tabel Paket Serba Gratis")
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Paket SG", format(len(df_paket), ","))
-        c2.metric("Total Struk SG", format(df_paket["Faktur"].nunique(), ","))
-        c3.metric("Total Qty", format(int(df_paket["Qty_Paket"].sum()), ","))
-        c4.metric(
-            "Total Sales Item",
-            "Rp " + format(df_paket["Sales_Paket"].sum(), ",.0f")
-        )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Paket SG", format(len(df_paket), ","))
+    c2.metric("Total Struk SG", format(df_paket["Faktur"].nunique(), ","))
+    c3.metric("Total Qty", format(int(df_paket["Qty_Paket"].sum()), ","))
+    c4.metric(
+        "Total Sales Item",
+        "Rp " + format(df_paket["Sales_Paket"].sum(), ",.0f")
+    )
 
-        st.markdown("---")
+    st.markdown("---")
 
-        # ============================================================
-        # FILTER & URUTKAN
-        # ============================================================
-        with st.expander("Filter & Urutkan", expanded=False):
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                sort_by = st.selectbox(
-                    "Urutkan berdasarkan:",
-                    ["Tanggal", "Sales_Paket", "Qty_Paket", "Faktur"],
-                    index=0,
-                )
-            with col_b:
-                sort_order = st.radio(
-                    "Urutan:", ["Descending", "Ascending"], horizontal=True
-                )
-            with col_c:
-                filter_grup = st.multiselect(
-                    "Filter Grup:",
-                    options=sorted(df_paket["Grup"].unique().tolist()),
-                    default=sorted(df_paket["Grup"].unique().tolist()),
-                )
-
-            ascending = (sort_order == "Ascending")
-            df_paket = df_paket[df_paket["Grup"].isin(filter_grup)]
-            df_paket = df_paket.sort_values(sort_by, ascending=ascending).reset_index(drop=True)
-
-        # ============================================================
-        # TAMPILKAN TABEL (1 BARIS = 1 PAKET)
-        # ============================================================
-        for idx, row in df_paket.iterrows():
-            faktur = row["Faktur"]
-            grup_key = row["Grup"]
-            nama_grup = row["Nama_Grup"]
-            list_plu = row["PLU"]
-            nama_item = row["Nama_Item"]
-            qty_paket = row["Qty_Paket"]
-            sales_paket = row["Sales_Paket"]
-            paket_ke = row["Paket_Ke"]
-            jml_paket = row["Jumlah_Paket"]
-            qty_total_struk = row["Qty_Total_Struk"]
-            tanggal = row["Tanggal"]
-
-            plu_str = ", ".join(str(p) for p in list_plu)
-
-            judul = (
-                "🧾 " + str(tanggal) + " | Bon " + str(faktur)
-                + " | " + nama_grup
-                + " | Paket " + str(paket_ke) + "/" + str(jml_paket)
-                + " | Qty: " + str(qty_paket)
-                + " | Rp " + format(sales_paket, ",.0f")
+    with st.expander("Filter & Urutkan", expanded=False):
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            sort_by = st.selectbox(
+                "Urutkan berdasarkan:",
+                ["Tanggal", "Sales_Paket", "Qty_Paket", "Faktur"],
+                index=0,
+            )
+        with col_b:
+            sort_order = st.radio(
+                "Urutan:", ["Descending", "Ascending"], horizontal=True
+            )
+        with col_c:
+            filter_grup = st.multiselect(
+                "Filter Grup:",
+                options=sorted(df_paket["Grup"].unique().tolist()),
+                default=sorted(df_paket["Grup"].unique().tolist()),
             )
 
-            with st.expander(judul):
-                st.write("**Faktur:** " + str(faktur))
-                st.write("**Grup:** " + str(nama_grup))
-                st.write("**PLU:** " + plu_str)
-                st.write("**Nama Item:** " + str(nama_item))
-                st.write(
-                    "**Qty Total di Struk:** " + str(qty_total_struk)
-                    + "  →  **" + str(jml_paket) + " paket** "
-                    + "(paket " + str(paket_ke) + ")"
-                )
-                st.write("**Qty per Paket:** " + str(qty_paket))
-                st.write("**Sales Item (dibayar):** Rp " + format(sales_paket, ",.0f"))
+        ascending = (sort_order == "Ascending")
+        df_paket = df_paket[df_paket["Grup"].isin(filter_grup)]
+        df_paket = df_paket.sort_values(sort_by, ascending=ascending).reset_index(drop=True)
 
-                # Tombol lihat struk
-                btn_key = "sg_btn_" + str(faktur) + "_" + str(grup_key) + "_" + str(paket_ke)
-                if st.button("🧾 Lihat Struk", key=btn_key):
-                    st.session_state["sg_selected_faktur"] = faktur
+    for idx, row in df_paket.iterrows():
+        faktur = row["Faktur"]
+        grup_key = row["Grup"]
+        nama_grup = row["Nama_Grup"]
+        list_plu = row["PLU"]
+        nama_item = row["Nama_Item"]
+        qty_paket = row["Qty_Paket"]
+        sales_paket = row["Sales_Paket"]
+        paket_ke = row["Paket_Ke"]
+        jml_paket = row["Jumlah_Paket"]
+        qty_total_struk = row["Qty_Total_Struk"]
+        tanggal = row["Tanggal"]
 
-                # Tampilkan struk kalau dipilih
-                if st.session_state.get("sg_selected_faktur") == faktur:
-                    st.markdown("---")
-                    st.markdown("### 🧾 Struk Bon " + str(faktur))
+        plu_str = ", ".join(str(p) for p in list_plu)
 
-                    # Cari bill_no dari faktur
-                    bill_no = None
-                    if not df_receipt.empty and "bill_no" in df_receipt.columns:
-                        # Cari di log_receipt_prn yang body1-nya mengandung faktur
-                        for _, r in df_receipt.iterrows():
-                            body = str(r.get("body1", "")) + str(r.get("header", ""))
-                            if faktur in body:
-                                bill_no = str(r["bill_no"]).strip()
-                                break
+        judul = (
+            str(tanggal) + " | Bon " + str(faktur)
+            + " | " + nama_grup
+            + " | Paket " + str(paket_ke) + "/" + str(jml_paket)
+            + " | Qty: " + str(qty_paket)
+            + " | Rp " + format(sales_paket, ",.0f")
+        )
 
-                    if bill_no is None:
-                        # Coba pakai faktur langsung (kalau bill_no = faktur)
-                        bill_no = faktur
+        with st.expander(judul):
+            st.write("Faktur: " + str(faktur))
+            st.write("Grup: " + str(nama_grup))
+            st.write("PLU: " + plu_str)
+            st.write("Nama Item: " + str(nama_item))
+            st.write(
+                "Qty Total di Struk: " + str(qty_total_struk)
+                + " -> " + str(jml_paket) + " paket "
+                + "(paket " + str(paket_ke) + ")"
+            )
+            st.write("Qty per Paket: " + str(qty_paket))
+            st.write("Sales Item (dibayar): Rp " + format(sales_paket, ",.0f"))
 
-                    struk_result = get_struk_text(df_receipt, bill_no)
+            btn_key = "sg_btn_" + str(faktur) + "_" + str(grup_key) + "_" + str(paket_ke)
+            if st.button("Lihat Struk", key=btn_key):
+                st.session_state["sg_selected_faktur"] = faktur
 
-                    if struk_result and struk_result[0]:
-                        full_receipt_text, raw_text = struk_result
+            if st.session_state.get("sg_selected_faktur") == faktur:
+                st.markdown("---")
+                st.markdown("### Struk Bon " + str(faktur))
 
-                        receipt_html = render_struk_html(full_receipt_text)
-                        components.html(receipt_html, height=650, scrolling=True)
+                bill_no = None
+                if not df_receipt.empty and "bill_no" in df_receipt.columns:
+                    for _, r in df_receipt.iterrows():
+                        body = str(r.get("body1", "")) + str(r.get("header", ""))
+                        if faktur in body:
+                            bill_no = str(r["bill_no"]).strip()
+                            break
 
-                        st.write("")
+                if bill_no is None:
+                    bill_no = faktur
 
-                        col1, col2, col3 = st.columns(3)
+                struk_result = get_struk_text(df_receipt, bill_no)
 
-                        with col1:
-                            st.download_button(
-                                label="📥 TXT",
-                                data=full_receipt_text,
-                                file_name="struk_" + str(faktur) + ".txt",
-                                mime="text/plain",
-                                use_container_width=True,
-                                key="sg_txt_" + str(faktur),
-                            )
+                if struk_result and struk_result[0]:
+                    full_receipt_text, raw_text = struk_result
 
-                        with col2:
-                            try:
-                                pdf_bytes = generate_pdf(full_receipt_text)
-                                st.download_button(
-                                    label="📄 PDF",
-                                    data=pdf_bytes,
-                                    file_name="struk_" + str(faktur) + ".pdf",
-                                    mime="application/pdf",
-                                    use_container_width=True,
-                                    key="sg_pdf_" + str(faktur),
-                                )
-                            except ImportError:
-                                st.info("Install `fpdf2` untuk PDF")
-                            except Exception as e:
-                                st.warning("PDF error: " + str(e))
+                    receipt_html = render_struk_html(full_receipt_text)
+                    components.html(receipt_html, height=650, scrolling=True)
 
-                        with col3:
-                            print_html = render_print_button(full_receipt_text)
-                            with st.popover("🖨️ Cetak", use_container_width=True):
-                                st.write("Klik tombol di bawah untuk print:")
-                                components.html(print_html, height=80)
+                    st.write("")
 
-                        with st.expander("🔍 Lihat Teks Mentah (Debug)"):
-                            st.code(raw_text, language=None)
-                            st.write("**Setelah diformat:**")
-                            st.code(full_receipt_text, language=None)
+                    col1, col2, col3 = st.columns(3)
 
-                    else:
-                        st.warning(
-                            "Struk untuk faktur " + str(faktur) + " tidak ditemukan di log_receipt_prn."
+                    with col1:
+                        st.download_button(
+                            label="TXT",
+                            data=full_receipt_text,
+                            file_name="struk_" + str(faktur) + ".txt",
+                            mime="text/plain",
+                            use_container_width=True,
+                            key="sg_txt_" + str(faktur),
                         )
 
-        st.markdown("---")
+                    with col2:
+                        try:
+                            pdf_bytes = generate_pdf(full_receipt_text)
+                            st.download_button(
+                                label="PDF",
+                                data=pdf_bytes,
+                                file_name="struk_" + str(faktur) + ".pdf",
+                                mime="application/pdf",
+                                use_container_width=True,
+                                key="sg_pdf_" + str(faktur),
+                            )
+                        except ImportError:
+                            st.info("Install fpdf2 untuk PDF")
+                        except Exception as e:
+                            st.warning("PDF error: " + str(e))
 
-        # ============================================================
-        # DOWNLOAD CSV
-        # ============================================================
-        df_export = df_paket.copy()
-        df_export["PLU"] = df_export["PLU"].apply(
-            lambda x: ", ".join(str(p) for p in x) if isinstance(x, list) else x
-        )
-        st.download_button(
-            "📥 Download Tabel SG per Paket (CSV)",
-            data=df_export.to_csv(index=False).encode("utf-8"),
-            file_name="sg_per_paket.csv",
-            mime="text/csv",
-        )
+                    with col3:
+                        print_html = render_print_button(full_receipt_text)
+                        with st.popover("Cetak", use_container_width=True):
+                            st.write("Klik tombol di bawah untuk print:")
+                            components.html(print_html, height=80)
 
-        # ============================================================
-        # DEBUG
-        # ============================================================
-        with st.expander("🔍 Debug"):
-            st.write("Total grup SG: " + str(len(SG_GROUPS)))
-            st.write("Total PLU SG: " + str(len(ALL_PLU_SG)))
-            st.write("PLU SG yang ditemukan di database: " + str(df_sg_all["plu_num"].nunique()))
-            st.write("Total baris item SG: " + str(len(df_sg_all)))
-            st.write("Total paket SG: " + str(len(df_paket)))
+                    with st.expander("Lihat Teks Mentah (Debug)"):
+                        st.code(raw_text, language=None)
+                        st.write("Setelah diformat:")
+                        st.code(full_receipt_text, language=None)
 
-            plu_di_db = set(df_detail["plu_num"].dropna().astype(int).unique())
-            plu_match = ALL_PLU_SG & plu_di_db
-            plu_tidak = ALL_PLU_SG - plu_di_db
-            st.write("PLU SG yang match: " + str(len(plu_match)))
-            st.write("PLU SG tidak ada di database: " + str(len(plu_tidak)))
+                else:
+                    st.warning(
+                        "Struk untuk faktur " + str(faktur) + " tidak ditemukan."
+                    )
 
-            if plu_tidak:
-                st.write("Contoh PLU tidak ada:", sorted(list(plu_tidak))[:20])
+    st.markdown("---")
 
-            st.write("**Distribusi paket per grup:**")
-            if not df_paket.empty:
-                dist = df_paket.groupby("Nama_Grup").agg(
-                    Jumlah_Paket=("Paket_Ke", "count"),
-                    Total_Sales=("Sales_Paket", "sum"),
-                ).sort_values("Jumlah_Paket", ascending=False)
-                st.dataframe(dist, use_container_width=True)
+    df_export = df_paket.copy()
+    df_export["PLU"] = df_export["PLU"].apply(
+        lambda x: ", ".join(str(p) for p in x) if isinstance(x, list) else x
+    )
+    st.download_button(
+        "Download Tabel SG per Paket (CSV)",
+        data=df_export.to_csv(index=False).encode("utf-8"),
+        file_name="sg_per_paket.csv",
+        mime="text/csv",
+    )
 
-    except Exception as e:
-        st.error("Error: " + str(e))
-        st.exception(e)
+    with st.expander("Debug"):
+        st.write("Total grup SG: " + str(len(SG_GROUPS)))
+        st.write("Total PLU SG: " + str(len(ALL_PLU_SG)))
+        st.write("Mode PLU terbaik: " + best_mode)
+        st.write("Total paket SG: " + str(len(df_paket)))
 
-elif db_file:
-    st.warning("Database " + db_file + " tidak ditemukan.")
+        if not df_paket.empty:
+            dist = df_paket.groupby("Nama_Grup").agg(
+                Jumlah_Paket=("Paket_Ke", "count"),
+                Total_Sales=("Sales_Paket", "sum"),
+            ).sort_values("Jumlah_Paket", ascending=False)
+            st.dataframe(dist, use_container_width=True)
+
+except Exception as e:
+    st.error("Error: " + str(e))
+    st.exception(e)
