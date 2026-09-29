@@ -2,6 +2,7 @@ import sqlite3
 import os
 import shutil
 import zipfile
+import json          ← tambahkan di sini
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -480,3 +481,69 @@ def build_kasir_dict(df_connection):
 
     return kasir_dict
     
+    # ============================================================
+# BUILD KASIR DICT (dari log_connection)
+# ============================================================
+import json
+
+
+def build_kasir_dict(df_connection):
+    """
+    Bangun dictionary {NIK: Nama} dari log_connection.
+    Parse JSON di kolom str_request & str_response.
+    """
+    if df_connection is None or df_connection.empty:
+        return {}
+
+    kasir_dict = {}
+
+    if "user_id" not in df_connection.columns:
+        return {}
+
+    for _, r in df_connection.iterrows():
+        user_id = str(r.get("user_id", "")).strip()
+        if not user_id or user_id in ("nan", "None", "0"):
+            continue
+
+        str_resp = str(r.get("str_response", ""))
+        str_req = str(r.get("str_request", ""))
+
+        nama = None
+
+        # Prioritas 1: dari str_response
+        if str_resp and str_resp not in ("nan", "None", ""):
+            try:
+                resp_json = json.loads(str_resp)
+                for key in ("NAMA", "nama", "NAMA_KASIR", "nama_kasir", "USER_NAME"):
+                    if key in resp_json:
+                        val = str(resp_json[key]).strip()
+                        if val and val not in ("nan", "None", ""):
+                            nama = val
+                            break
+            except Exception:
+                pass
+
+        # Prioritas 2: dari str_request
+        if nama is None and str_req and str_req not in ("nan", "None", ""):
+            try:
+                req_json = json.loads(str_req)
+                trx_data = req_json.get("TRX_DATA", {})
+                if isinstance(trx_data, dict):
+                    for key in ("NAMA", "nama", "NAMA_KASIR"):
+                        if key in trx_data:
+                            val = str(trx_data[key]).strip()
+                            if val and val not in ("nan", "None", ""):
+                                nama = val
+                                break
+            except Exception:
+                pass
+
+        # Simpan
+        if user_id and nama:
+            if user_id not in kasir_dict:
+                kasir_dict[user_id] = nama
+            else:
+                if len(nama) > len(str(kasir_dict[user_id])):
+                    kasir_dict[user_id] = nama
+
+    return kasir_dict
