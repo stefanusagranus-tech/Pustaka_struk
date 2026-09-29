@@ -6,11 +6,11 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from utils.common import (
-    load_tables, normalize_plu_series,
+    load_tables, normalize_plu_series, format_struk,
     render_struk_html, generate_pdf, render_print_button,
     get_struk_text, build_plu_name_dict,
 )
-from utils.plu_dict import get_nama_plu, get_plu_normalized
+from utils.plu_dict import get_nama_plu
 
 st.set_page_config(
     page_title="Laporan Suger",
@@ -18,8 +18,8 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🎁 Laporan Suger")
-st.markdown("Analisis struk syarat Suger dan struk redeem.")
+st.title("🎁 Laporan Suger per Item")
+st.markdown("Menampilkan item Suger beserta qty, sales, dan nomor bon.")
 
 # ============================================================
 # DAFTAR PLU SUGER
@@ -65,31 +65,11 @@ try:
         st.stop()
 
     # ============================================================
-    # PREPARE DATA
-    # ============================================================
-    for c in ["total_faktur", "discount", "promo_disc", "wallet", "card", "cash"]:
-        if c in df_sale.columns:
-            df_sale[c] = pd.to_numeric(df_sale[c], errors="coerce").fillna(0)
-
-    for c in ["price", "qty", "disc", "promo_disc"]:
-        if c in df_detail.columns:
-            df_detail[c] = pd.to_numeric(df_detail[c], errors="coerce").fillna(0)
-
-    # Total belanja setelah diskon
-    df_sale["total_belanja"] = (
-        df_sale["total_faktur"]
-        - df_sale["discount"]
-        - df_sale["promo_disc"]
-    )
-
-    # Deteksi struk syarat
-    df_sale["is_syarat"] = df_sale["total_belanja"] >= SYARAT_MIN
-
-    # ============================================================
-    # NORMALISASI PLU DI TX_TRANS
+    # NORMALISASI PLU
     # ============================================================
     df_detail["plu_asli"] = pd.to_numeric(df_detail["plu"], errors="coerce")
 
+    # Coba beberapa mode normalisasi, pilih yang paling banyak match
     modes = ["asli", "buang_1", "buang_2", "div_10", "div_100"]
     best_mode = "buang_1"
     best_count = 0
@@ -106,91 +86,47 @@ try:
     df_detail["plu_norm"] = normalize_plu_series(df_detail["plu"], best_mode)
     df_detail["plu_norm_int"] = df_detail["plu_norm"].round().astype("Int64")
 
+    # Filter hanya PLU Suger
+    df_suger_detail = df_detail[
+        df_detail["plu_norm_int"].isin(PLU_SUGER)
+    ].copy()
+
     st.caption(
-        "Mode normalisasi PLU terbaik: **" + best_mode + "** "
-        "(ditemukan " + str(best_count) + " baris dengan PLU Suger)"
+        "Mode normalisasi PLU: **" + best_mode + "** — "
+        "ditemukan **" + str(len(df_suger_detail)) + "** baris item Suger."
     )
 
-    # Item Suger = PLU ada di daftar
-    df_detail["is_suger_item"] = df_detail["plu_norm_int"].isin(PLU_SUGER)
+    if df_suger_detail.empty:
+        st.warning("Tidak ada item Suger di database ini.")
+        st.stop()
 
-    # Item redeem = PLU Suger DAN promo_disc > 0
-    df_detail["is_redeem"] = (
-        df_detail["is_suger_item"] & (df_detail["promo_disc"] > 0)
+    # Konversi numerik
+    for c in ["qty", "price", "disc", "promo_disc"]:
+        if c in df_suger_detail.columns:
+            df_suger_detail[c] = pd.to_numeric(
+                df_suger_detail[c], errors="coerce"
+            ).fillna(0)
+
+    df_suger_detail["bill_str"] = (
+        df_suger_detail["bill_no"].astype(str).str.strip()
     )
 
-    # Bill yang redeem (1 struk = 1 redeem)
-    df_detail["bill_str"] = df_detail["bill_no"].astype(str).str.strip()
-    bill_redeem_set = set(
-        df_detail[df_detail["is_redeem"]]["bill_str"].unique()
+    # ============================================================
+    # FILTER STRUK SYARAT (total_belanja >= 20000)
+    # ============================================================
+    # Hitung total_belanja per faktur
+    for c in ["total_faktur", "discount", "promo_disc"]:
+        if c in df_sale.columns:
+            df_sale[c] = pd.to_numeric(
+                df_sale[c], errors="coerce"
+            ).fillna(0)
+
+    df_sale["total_belanja"] = (
+        df_sale["total_faktur"]
+        - df_sale["discount"]
+        - df_sale["promo_disc"]
     )
-
-    # Di tx_tsale, tambahkan bill_no (kalau belum ada)
-    df_sale["bill_str"] = df_sale["faktur"].astype(str).str.strip()
-
-    # Mapping faktur -> bill_no dari log_receipt_prn
-    bill_to_no = {}
-    faktur_to_no = {}
-    if not df_receipt.empty and "bill_no" in df_receipt.columns:
-        import re
-        df_receipt_copy = df_receipt.copy()
-        if "body1" in df_receipt_copy.columns:
-            for _, r in df_receipt_copy.iterrows():
-                b = str(r["bill_no"]).strip()
-                b_z = b.zfill(4)
-                body = str(r.get("body1", "")) + str(r.get("header", ""))
-                m = re.search(r"C383-(\d+-\d+[A-Z0-9]+)", body)
-                if m:
-                    part = m.group(1)
-                    if "-" in part:
-                        faktur = "119-" + part.split("-", 1)[1]
-                    else:
-                        faktur = part
-                    bill_to_no[faktur] = b
-                    faktur_to_no[faktur] = b
-
-    # Ambil bill_no dari tx_trans (lebih akurat, karena tx_trans punya bill_no)
-    df_sale["bill_no"] = df_sale["faktur"].apply(
-        lambda x: bill_to_no.get(str(x).strip(), "")
-    )
-
-    # Kalau masih kosong, coba cari bill_no dari tx_trans yang faktur-nya sama
-    # (kadang faktur di tx_tsale = bill_no di tx_trans, cuma beda format)
-    if df_sale["bill_no"].astype(str).str.strip().eq("").all():
-        # Fallback: extract 3 digit terakhir dari faktur
-        import re
-        df_sale["bill_no"] = df_sale["faktur"].apply(
-            lambda x: (re.search(r"(\d+)$", str(x)).group(1).lstrip("0")
-                       if re.search(r"(\d+)$", str(x)) else "")
-        )
-
-    # Tandai redeem berdasarkan bill_no
-    df_sale["is_redeem"] = (
-        df_sale["bill_no"].astype(str).str.strip().isin(bill_redeem_set)
-    )
-
-    # Nama item per bill (untuk review)
-    df_suger_items = df_detail[df_detail["is_suger_item"]].copy()
-
-    if not df_suger_items.empty:
-        df_suger_items["nama_item"] = df_suger_items["plu_asli"].apply(
-            lambda x: get_nama_plu(x) if pd.notna(x) else "-"
-        )
-
-        suger_per_bill = (
-            df_suger_items.groupby("bill_str")
-            .agg(
-                Item_Suger=("nama_item", lambda x: ", ".join(x.unique())),
-                Jumlah_Item=("bill_str", "count"),
-            )
-            .to_dict("index")
-        )
-    else:
-        suger_per_bill = {}
-
-    df_sale["item_suger"] = df_sale["bill_no"].astype(str).apply(
-        lambda x: suger_per_bill.get(x, {}).get("Item_Suger", "-")
-    )
+    df_sale["is_syarat"] = df_sale["total_belanja"] >= SYARAT_MIN
 
     # ============================================================
     # KPI
@@ -198,276 +134,220 @@ try:
     st.markdown("---")
     st.subheader("💰 Ringkasan Suger")
 
-    n_struk_total = len(df_sale)
-    n_struk_syarat = int(df_sale["is_syarat"].sum())
-    n_struk_redeem = int(df_sale["is_redeem"].sum())
-    n_struk_syarat_no_redeem = n_struk_syarat - n_struk_redeem
-    n_struk_tidak_syarat = n_struk_total - n_struk_syarat
+    # Total struk syarat
+    total_struk = len(df_sale)
+    total_struk_syarat = int(df_sale["is_syarat"].sum())
 
-    rasio_redeem = (
-        (n_struk_redeem / n_struk_syarat * 100)
-        if n_struk_syarat > 0 else 0
-    )
+    # Total item Suger (baris)
+    total_item_suger = len(df_suger_detail)
+
+    # Total bon unik yang punya item Suger
+    total_bon_suger = df_suger_detail["bill_str"].nunique()
+
+    # Total sales item Suger (setelah diskon)
+    total_sales_suger = (
+        df_suger_detail["price"] * df_suger_detail["qty"]
+        - df_suger_detail["promo_disc"]
+    ).sum()
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🧾 Total Struk", format(n_struk_total, ","))
-    c2.metric("✅ Struk Syarat", format(n_struk_syarat, ","))
-    c3.metric("🎁 Struk Redeem", format(n_struk_redeem, ","))
-    c4.metric("📊 Rasio Redeem", format(rasio_redeem, ".1f") + "%")
-
-    # ============================================================
-    # PIE CHART
-    # ============================================================
-    st.markdown("---")
-    st.subheader("📊 Diagram Struk")
-
-    try:
-        import plotly.graph_objects as go
-
-        labels = [
-            "Syarat + Redeem",
-            "Syarat (Tidak Redeem)",
-            "Tidak Syarat",
-        ]
-        values = [
-            n_struk_redeem,
-            n_struk_syarat_no_redeem,
-            n_struk_tidak_syarat,
-        ]
-        colors = ["#2ecc71", "#f39c12", "#e74c3c"]
-
-        fig = go.Figure(
-            data=[
-                go.Pie(
-                    labels=labels,
-                    values=values,
-                    hole=0.4,
-                    marker=dict(colors=colors),
-                    textinfo="label+percent+value",
-                    textfont=dict(size=14),
-                )
-            ]
-        )
-        fig.update_layout(
-            title="Distribusi Struk Suger",
-            height=500,
-            showlegend=True,
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    except ImportError:
-        st.warning("Install `plotly` di requirements.txt untuk pie chart.")
-
-    # ============================================================
-    # REVIEW STRUK
-    # ============================================================
-    st.markdown("---")
-    st.subheader("📋 Review Struk")
-
-    with st.expander("Filter", expanded=False):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            filter_status = st.multiselect(
-                "Status:",
-                options=["Syarat + Redeem", "Syarat (Tidak Redeem)", "Tidak Syarat"],
-                default=["Syarat + Redeem", "Syarat (Tidak Redeem)", "Tidak Syarat"],
-            )
-        with col_b:
-            sort_by = st.selectbox(
-                "Urutkan:",
-                ["Total Belanja (Desc)", "Total Belanja (Asc)", "Bill No"],
-            )
-
-    def get_status(row):
-        if row["is_redeem"]:
-            return "Syarat + Redeem"
-        if row["is_syarat"]:
-            return "Syarat (Tidak Redeem)"
-        return "Tidak Syarat"
-
-    df_sale["status"] = df_sale.apply(get_status, axis=1)
-    df_review = df_sale[df_sale["status"].isin(filter_status)].copy()
-
-    if sort_by == "Total Belanja (Desc)":
-        df_review = df_review.sort_values("total_belanja", ascending=False)
-    elif sort_by == "Total Belanja (Asc)":
-        df_review = df_review.sort_values("total_belanja", ascending=True)
-    else:
-        df_review = df_review.sort_values("faktur", ascending=True)
-
-    df_review = df_review.reset_index(drop=True)
-
-    cols_show = [c for c in [
-        "bill_no", "faktur", "date_tx", "time_tx", "user_id",
-        "total_faktur", "discount", "promo_disc", "total_belanja",
-        "status", "item_suger",
-    ] if c in df_review.columns]
-
-    df_display = df_review[cols_show].rename(columns={
-        "bill_no": "Bill",
-        "faktur": "Faktur",
-        "date_tx": "Tanggal",
-        "time_tx": "Jam",
-        "user_id": "Kasir",
-        "total_faktur": "Total Faktur",
-        "discount": "Disc",
-        "promo_disc": "Promo",
-        "total_belanja": "Total Belanja",
-        "status": "Status",
-        "item_suger": "Item Suger",
-    })
-
-    for col in ["Total Faktur", "Disc", "Promo", "Total Belanja"]:
-        if col in df_display.columns:
-            df_display[col] = df_display[col].apply(
-                lambda x: "Rp " + format(x, ",.0f")
-            )
-
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
-
-    csv = df_review[cols_show].to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "📥 Download Review Suger (CSV)",
-        data=csv,
-        file_name="review_suger.csv",
-        mime="text/csv",
+    c1.metric("🧾 Total Struk", format(total_struk, ","))
+    c2.metric("✅ Struk Syarat", format(total_struk_syarat, ","))
+    c3.metric("🎁 Bon dengan Item Suger", format(total_bon_suger, ","))
+    c4.metric(
+        "💵 Total Sales Suger",
+        "Rp " + format(total_sales_suger, ",.0f")
     )
 
-    # ============================================================
-    # REVIEW STRUK - PAKAI BILL_NO (SEPERTI CEK STRUK)
-    # ============================================================
-    st.markdown("---")
-    st.subheader("🧾 Review Struk Suger")
-    st.write("Klik bon untuk lihat struk:")
-
-    list_bill_review = sorted(
-        df_review["bill_no"].dropna().unique().tolist(),
-        reverse=True
+    # Info tambahan
+    st.info(
+        "Ditemukan " + str(total_item_suger) + " baris item Suger "
+        "dari " + str(total_bon_suger) + " bon berbeda."
     )
-    list_bill_review = [b for b in list_bill_review if str(b).strip() != ""]
 
-    if not list_bill_review:
-        st.info("Tidak ada bill_no di data review.")
-    else:
-        st.caption("Tersedia " + str(len(list_bill_review)) + " bon")
+    st.markdown("---")
 
-        if "suger_selected_bill" not in st.session_state:
-            st.session_state["suger_selected_bill"] = None
+    # ============================================================
+    # AGREGASI PER PLU
+    # ============================================================
+    agg_rows = []
+    for plu, grp in df_suger_detail.groupby("plu_norm_int"):
+        plu_int = int(plu)
 
-        cols_per_row = 6
-        list_show = list_bill_review[:60]
+        qty = grp["qty"].sum()
+        sales = (grp["price"] * grp["qty"]).sum()
 
-        for i in range(0, len(list_show), cols_per_row):
-            chunk = list_show[i:i + cols_per_row]
-            cols = st.columns(len(chunk))
-            for col, bill in zip(cols, chunk):
-                df_b = df_review[df_review["bill_no"] == bill]
-                if df_b.empty:
-                    label = str(bill)
-                else:
-                    status_b = df_b.iloc[0]["status"]
-                    if status_b == "Syarat + Redeem":
-                        label = "🎁 " + str(bill)
-                    elif status_b == "Syarat (Tidak Redeem)":
-                        label = "✅ " + str(bill)
-                    else:
-                        label = "❌ " + str(bill)
+        # Nama item
+        plu_asli = grp["plu_asli"].iloc[0] if not grp.empty else plu_int
+        nama = get_nama_plu(plu_asli)
+        if nama == "-":
+            nama = get_nama_plu(plu_int)
 
-                btn_key = "suger_btn_" + str(bill)
-                if col.button(label, key=btn_key, use_container_width=True):
-                    st.session_state["suger_selected_bill"] = bill
+        list_bon = sorted(
+            set(grp["bill_str"].unique()),
+            key=lambda x: int(x) if x.isdigit() else 0
+        )
 
-        if len(list_bill_review) > 60:
-            st.caption("Menampilkan 60 bon pertama.")
+        agg_rows.append({
+            "PLU": plu_int,
+            "Nama_Item": nama,
+            "Qty": int(qty),
+            "Sales_Item": sales,
+            "List_Bon": list_bon,
+            "Jumlah_Bon": len(list_bon),
+        })
 
-        # ============================================================
-        # TAMPILKAN STRUK JIKA DIPILIH
-        # ============================================================
-        sel = st.session_state.get("suger_selected_bill")
+    df_agg = pd.DataFrame(agg_rows).sort_values(
+        "Sales_Item", ascending=False
+    ).reset_index(drop=True)
 
-        if sel:
-            df_b = df_review[df_review["bill_no"] == sel]
-            if not df_b.empty:
-                row = df_b.iloc[0]
+    st.markdown("### Tabel Suger per PLU")
+
+    # Ringkasan tambahan
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Total PLU Suger", format(df_agg["PLU"].nunique(), ","))
+    c6.metric("Total Qty", format(int(df_agg["Qty"].sum()), ","))
+    c7.metric("Total Bon Unik", format(
+        len(set(b for bl in df_agg["List_Bon"] for b in bl)), ","
+    ))
+    c8.metric(
+        "Total Sales Item",
+        "Rp " + format(df_agg["Sales_Item"].sum(), ",.0f")
+    )
+
+    st.markdown("---")
+
+    # ============================================================
+    # TAMPILKAN PER PLU
+    # ============================================================
+    for idx, row in df_agg.iterrows():
+        plu = row["PLU"]
+        nama = row["Nama_Item"]
+        qty = row["Qty"]
+        sales = row["Sales_Item"]
+        list_bon = row["List_Bon"]
+        jml_bon = row["Jumlah_Bon"]
+
+        judul = (
+            "PLU " + str(plu)
+            + " - " + str(nama)
+            + " - Qty: " + str(qty)
+            + " - Sales: Rp " + format(sales, ",.0f")
+            + " - " + str(jml_bon) + " bon"
+        )
+
+        with st.expander(judul):
+            st.write("**Nama Item:** " + str(nama))
+            st.write("**Total Qty:** " + str(qty))
+            st.write("**Total Sales Item:** Rp " + format(sales, ",.0f"))
+            st.write("**Jumlah Bon:** " + str(jml_bon))
+
+            st.markdown("**Daftar Nomor Bon** (klik untuk lihat struk):")
+
+            cols_per_row = 4
+            for i in range(0, len(list_bon), cols_per_row):
+                chunk = list_bon[i:i + cols_per_row]
+                cols = st.columns(len(chunk))
+                for col, bon in zip(cols, chunk):
+                    btn_key = "suger_btn_" + str(plu) + "_" + str(bon)
+                    if col.button(
+                        "Bon " + str(bon),
+                        key=btn_key,
+                        use_container_width=True,
+                    ):
+                        st.session_state["suger_selected_bon"] = {
+                            "plu": int(plu),
+                            "bon": bon,
+                        }
+
+            sel = st.session_state.get("suger_selected_bon")
+            if (sel
+                    and sel["plu"] == int(plu)
+                    and sel["bon"] in list_bon):
 
                 st.markdown("---")
-                col_a, col_b, col_c = st.columns(3)
-                col_a.metric("Bill No", str(sel))
-                col_b.metric(
-                    "Total Belanja",
-                    "Rp " + format(row["total_belanja"], ",.0f")
-                )
-                col_c.metric("Status", row["status"])
+                st.markdown("### 🧾 Struk Bon " + str(sel["bon"]))
 
-                # Panggil struk pakai bill_no langsung
-                struk_result = get_struk_text(df_receipt, sel)
+                struk_result = get_struk_text(df_receipt, sel["bon"])
 
                 if struk_result and struk_result[0]:
                     full_receipt_text, raw_text = struk_result
 
-                    st.markdown("### Struk Bon " + str(sel))
                     receipt_html = render_struk_html(full_receipt_text)
                     components.html(receipt_html, height=650, scrolling=True)
 
+                    st.write("")
+
                     col1, col2, col3 = st.columns(3)
+
                     with col1:
                         st.download_button(
-                            "📥 TXT",
+                            label="📥 TXT",
                             data=full_receipt_text,
-                            file_name="struk_bon_" + str(sel) + ".txt",
+                            file_name="struk_bon_" + str(sel["bon"]) + ".txt",
                             mime="text/plain",
                             use_container_width=True,
-                            key="suger_txt_" + str(sel),
+                            key="suger_txt_" + str(plu) + "_" + str(sel["bon"]),
                         )
+
                     with col2:
                         try:
                             pdf_bytes = generate_pdf(full_receipt_text)
                             st.download_button(
-                                "📄 PDF",
+                                label="📄 PDF",
                                 data=pdf_bytes,
-                                file_name="struk_bon_" + str(sel) + ".pdf",
+                                file_name="struk_bon_" + str(sel["bon"]) + ".pdf",
                                 mime="application/pdf",
                                 use_container_width=True,
-                                key="suger_pdf_" + str(sel),
+                                key="suger_pdf_" + str(plu) + "_" + str(sel["bon"]),
                             )
                         except ImportError:
-                            st.info("Install fpdf2 untuk PDF")
+                            st.info("Install `fpdf2` untuk PDF")
                         except Exception as e:
                             st.warning("PDF error: " + str(e))
+
                     with col3:
                         print_html = render_print_button(full_receipt_text)
                         with st.popover("🖨️ Cetak", use_container_width=True):
                             st.write("Klik tombol di bawah untuk print:")
                             components.html(print_html, height=80)
+
+                    with st.expander("🔍 Lihat Teks Mentah (Debug)"):
+                        st.code(raw_text, language=None)
+                        st.write("**Setelah diformat:**")
+                        st.code(full_receipt_text, language=None)
+
                 else:
                     st.warning(
-                        "Struk tidak ditemukan untuk bill " + str(sel)
-                        + ". Coba bill lain."
+                        "Struk bon " + str(sel["bon"]) + " tidak ditemukan."
                     )
-            else:
-                st.info("Bon tidak ditemukan di data review.")
-        else:
-            st.info("Klik salah satu bon di atas untuk melihat struknya.")
+
+    st.markdown("---")
+
+    # ============================================================
+    # DOWNLOAD CSV
+    # ============================================================
+    df_export = df_agg.copy()
+    df_export["List_Bon"] = df_export["List_Bon"].apply(
+        lambda x: ", ".join(str(b) for b in x)
+    )
+    st.download_button(
+        "📥 Download Tabel Suger per PLU (CSV)",
+        data=df_export.to_csv(index=False).encode("utf-8"),
+        file_name="suger_per_plu.csv",
+        mime="text/csv",
+    )
 
     # ============================================================
     # DEBUG
     # ============================================================
     with st.expander("🔍 Debug"):
         st.write("Total PLU Suger: " + str(len(PLU_SUGER)))
-        st.write("PLU Suger: " + str(sorted(list(PLU_SUGER))))
-        st.write("Mode normalisasi PLU: **" + best_mode + "**")
-        st.write("Baris Suger item (PLU match): " + str(df_detail["is_suger_item"].sum()))
-        st.write("Baris redeem (PLU match + promo_disc > 0): " + str(df_detail["is_redeem"].sum()))
-        st.write("Bill redeem: " + str(len(bill_redeem_set)))
-        st.write("Contoh bill redeem: " + str(list(bill_redeem_set)[:10]))
-        st.write("Total bill_no di review: " + str(len(list_bill_review)))
-        st.write("Contoh bill_no di review: " + str(list_bill_review[:10]))
-
-        st.write("**10 baris tx_trans dengan PLU Suger:**")
-        if df_detail["is_suger_item"].sum() > 0:
-            df_sample = df_detail[df_detail["is_suger_item"]][
-                ["bill_no", "plu", "plu_norm_int", "price", "qty", "promo_disc"]
-            ].head(10)
-            st.dataframe(df_sample, use_container_width=True, hide_index=True)
+        st.write("Mode normalisasi: **" + best_mode + "**")
+        st.write("Total baris item Suger: " + str(len(df_suger_detail)))
+        st.write("Total bon dengan item Suger: " + str(total_bon_suger))
+        st.write("Contoh PLU Suger di database:")
+        st.write(df_suger_detail[["bill_no", "plu", "plu_norm_int", "price", "qty"]].head(10))
 
 except Exception as e:
     st.error("Error: " + str(e))
