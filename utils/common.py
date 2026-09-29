@@ -12,6 +12,60 @@ STRUK_WIDTH = 42
 
 
 # ============================================================
+# AUTO-NORMALISASI PLU
+# ============================================================
+def normalize_plu_series(series, mode="asli"):
+    """
+    Normalisasi PLU dari database ke format asli.
+    mode: asli | buang_1 | buang_2 | div_10 | div_100
+    """
+    s = pd.to_numeric(series, errors="coerce")
+    if mode == "asli":
+        return s
+    if mode == "buang_1":
+        return pd.to_numeric(
+            s.astype(str).str.replace(r"\.0$", "", regex=True).str[:-1],
+            errors="coerce"
+        )
+    if mode == "buang_2":
+        return pd.to_numeric(
+            s.astype(str).str.replace(r"\.0$", "", regex=True).str[:-2],
+            errors="coerce"
+        )
+    if mode == "div_10":
+        return s / 10
+    if mode == "div_100":
+        return s / 100
+    return s
+
+
+def detect_best_plu_mode(df_detail, plu_target_set):
+    """
+    Coba beberapa mode normalisasi PLU, pilih yang paling banyak match.
+    Return: (mode, jumlah_match, df_hasil_dengan_kolom_plu_norm)
+    """
+    modes = ["asli", "buang_1", "buang_2", "div_10", "div_100"]
+    best_mode = "asli"
+    best_count = 0
+    best_df = pd.DataFrame()
+
+    for mode in modes:
+        df_temp = df_detail.copy()
+        df_temp["plu_norm"] = normalize_plu_series(df_temp["plu"], mode)
+        df_temp["plu_norm_int"] = df_temp["plu_norm"].round().astype("Int64")
+
+        mask = df_temp["plu_norm_int"].isin(plu_target_set)
+        count = int(mask.sum())
+
+        if count > best_count:
+            best_count = count
+            best_mode = mode
+            best_df = df_temp[mask].copy()
+
+    return best_mode, best_count, best_df
+
+
+# ============================================================
 # BACA DATABASE
 # ============================================================
 def get_table_names(conn):
@@ -20,11 +74,6 @@ def get_table_names(conn):
 
 
 def load_tables(db_path, table_names):
-    """
-    Load tabel-tabel tertentu dari database.
-    table_names: list nama tabel.
-    Return: dict {nama_tabel: df}
-    """
     conn = sqlite3.connect(db_path)
     tables = get_table_names(conn)
     dfs = {}
@@ -41,43 +90,18 @@ def load_tables(db_path, table_names):
     return dfs
 
 
-def setup_upload():
-    """
-    Bikin sidebar upload. Return: path database atau None.
-    """
-    st.sidebar.header("📁 Sumber Data")
-    upload_mode = st.sidebar.radio(
-        "Sumber database:",
-        ["Upload ZIP", "Path Lokal"],
-        key="common_upload_mode",
-    )
-
-    extract_path = "temp_common_db"
-
-    if upload_mode == "Upload ZIP":
-        uploaded = st.sidebar.file_uploader(
-            "Upload ZIP database", type=["zip"], key="common_zip"
-        )
-        if uploaded is not None:
-            if os.path.exists(extract_path):
-                shutil.rmtree(extract_path)
-            os.makedirs(extract_path, exist_ok=True)
-            with zipfile.ZipFile(uploaded, "r") as z:
-                z.extractall(extract_path)
-            for root, _, files in os.walk(extract_path):
-                for f in files:
-                    if f.endswith((".db", ".sqlite", ".sqlite3")):
-                        db_file = os.path.join(root, f)
-                        st.sidebar.success("✅ " + os.path.basename(db_file))
-                        return db_file
-            st.sidebar.error("Tidak ada file .db di dalam ZIP.")
-            return None
-        return None
-    else:
-        db_file = st.sidebar.text_input(
-            "Path database:", value="pos_database.db", key="common_path"
-        )
-        return db_file
+def extract_zip_and_find_db(uploaded_zip, extract_path):
+    """Extract ZIP, cari file .db, return path."""
+    if os.path.exists(extract_path):
+        shutil.rmtree(extract_path)
+    os.makedirs(extract_path, exist_ok=True)
+    with zipfile.ZipFile(uploaded_zip, "r") as z:
+        z.extractall(extract_path)
+    for root, _, files in os.walk(extract_path):
+        for f in files:
+            if f.endswith((".db", ".sqlite", ".sqlite3")):
+                return os.path.join(root, f)
+    return None
 
 
 # ============================================================
