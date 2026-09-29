@@ -2,11 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import shutil
-from utils.common import (
-    extract_zip_and_find_db,
-    load_tables,
-    build_kasir_dict,
-)
+from utils.common import extract_zip_and_find_db, load_tables, build_kasir_dict
 
 st.set_page_config(
     page_title="Dashboard POS",
