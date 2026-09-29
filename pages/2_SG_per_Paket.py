@@ -155,9 +155,8 @@ try:
 
     st.success("Berhasil load " + str(len(plu_name_dict)) + " PLU dari dictionary.")
 
-    st.info(
-        "Mode PLU terbaik: " + best_mode
-        + " — ditemukan " + str(best_count) + " baris item dengan PLU SG."
+     st.info(
+        "Ditemukan " + str(best_count) + " baris item dengan PLU SG."
     )
 
     with st.expander("Debug: Cek Format PLU", expanded=(best_count == 0)):
@@ -224,13 +223,13 @@ try:
         list_plu_di_struk = sorted(grp["plu_norm_int"].unique().astype(int).tolist())
 
         nama_items = []
-        for plu in list_plu_di_struk:
-            nm = get_nama_plu(plu)
-            if nm != "-":
-                nama_items.append(nm)
-        nama_items_str = " + ".join(nama_items[:3])
-        if len(nama_items) > 3:
-            nama_items_str += " + ..."
+    for plu in list_plu_di_struk:
+        nm = get_nama_plu(plu)
+        if nm != "-":
+            nama_items.append(nm)
+    nama_items_str = " + ".join(nama_items[:3])
+    if len(nama_items) > 3:
+        nama_items_str += " + ..."
 
         for p in range(1, jumlah_paket + 1):
             paket_rows.append({
