@@ -85,10 +85,18 @@ df_sale["date_tx"] = pd.to_datetime(df_sale["date_tx"], errors="coerce")
 # Konversi numerik
 num_cols = ["total_faktur", "cash", "card", "discount", "promo_disc",
             "charity", "cash_out", "wallet", "ol_payment", "voucher",
-            "member", "total_item"]
+            "total_item"]
 for c in num_cols:
     if c in df_sale.columns:
         df_sale[c] = pd.to_numeric(df_sale[c], errors="coerce").fillna(0)
+
+# Member: pakai cust_id (bukan member)
+if "cust_id" in df_sale.columns:
+    df_sale["cust_id_str"] = df_sale["cust_id"].astype(str).str.strip()
+
+# Member: pakai cust_id (bukan member)
+if "cust_id" in df_sale.columns:
+    df_sale["cust_id_str"] = df_sale["cust_id"].astype(str).str.strip()
 
 # ============================================================
 # FILTER TANGGAL
@@ -167,10 +175,14 @@ if not df_card.empty and "amount" in df_card.columns:
 
 total_ewallet = df["wallet"].sum() if "wallet" in df.columns else 0
 
-total_sales_member = (
-    df[df["member"] > 0]["total_faktur"].sum()
-    if "member" in df.columns else 0
-)
+if "cust_id" in df.columns:
+    df["_is_member_kpi"] = df["cust_id"].apply(
+        lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
+                  and pd.notna(x)
+    )
+    total_sales_member = df[df["_is_member_kpi"]]["total_faktur"].sum()
+else:
+    total_sales_member = 0
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("💰 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
@@ -371,8 +383,14 @@ st.markdown("---")
 st.subheader("👤 Rekapitulasi per Kasir")
 
 if "user_id" in df.columns:
-    # Siapkan kolom is_member
-    df["is_member"] = df["member"] > 0 if "member" in df.columns else False
+    # Siapkan kolom is_member dari cust_id
+    if "cust_id" in df.columns:
+        df["is_member"] = df["cust_id"].apply(
+            lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
+                      and pd.notna(x)
+        )
+    else:
+        df["is_member"] = False
 
     # Agregasi
     agg_rows = []
