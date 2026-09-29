@@ -8,6 +8,8 @@ import streamlit.components.v1 as components
 import html
 import re
 
+from utils.plu_dict import PLU_NAMES, get_nama_plu, get_plu_normalized
+
 STRUK_WIDTH = 42
 
 
@@ -331,16 +333,46 @@ def parse_struk_items(body1):
     return items
 
 
-def build_plu_name_dict(df_receipt, df_detail):
+# ============================================================
+# BUILD PLU NAME DICT
+# ============================================================
+def build_plu_name_dict(df_receipt=None, df_detail=None):
+    """
+    Return dictionary PLU -> nama.
+
+    Prioritas:
+      1. Dari PLU_NAMES (hardcode di plu_dict.py) — UTAMA
+      2. Fallback ke parse struk (kalau PLU_NAMES kosong)
+    """
+    result = {}
+
+    # ============================================
+    # PRIORITAS 1: Dari hardcode PLU_NAMES
+    # ============================================
+    if PLU_NAMES:
+        for plu, nama in PLU_NAMES.items():
+            result[plu] = nama
+        return result
+
+    # ============================================
+    # PRIORITAS 2: Fallback parse struk
+    # ============================================
+    if df_receipt is None or df_detail is None:
+        return result
+
     if df_receipt.empty or df_detail.empty:
-        return {}
+        return result
+
     plu_names = {}
     bill_to_body = {}
+
     for _, r in df_receipt.iterrows():
         bill = str(r["bill_no"]).strip().zfill(4)
         bill_to_body[bill] = str(r.get("body1", ""))
+
     df_detail = df_detail.copy()
     df_detail["_bill_z"] = df_detail["bill_no"].astype(str).str.strip().str.zfill(4)
+
     bill_to_items = {}
     for bill, grp in df_detail.groupby("_bill_z"):
         items = []
@@ -354,6 +386,7 @@ def build_plu_name_dict(df_receipt, df_detail):
             except Exception:
                 continue
         bill_to_items[bill] = items
+
     for bill, body in bill_to_body.items():
         struk_items = parse_struk_items(body)
         tx_items = bill_to_items.get(bill, [])
@@ -365,8 +398,10 @@ def build_plu_name_dict(df_receipt, df_detail):
                     if plu not in plu_names:
                         plu_names[plu] = {}
                     plu_names[plu][s["nama"]] = plu_names[plu].get(s["nama"], 0) + 1
+
     result = {}
     for plu, names in plu_names.items():
         best = max(names.items(), key=lambda x: x[1])[0]
         result[plu] = best
+
     return result
