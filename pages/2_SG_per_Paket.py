@@ -10,6 +10,7 @@ from utils.common import (
     render_struk_html, generate_pdf, render_print_button,
     get_struk_text, build_plu_name_dict,
 )
+from utils.plu_dict import get_nama_plu, get_plu_normalized
 
 st.set_page_config(
     page_title="SG per Paket",
@@ -150,11 +151,9 @@ try:
         st.error("Tabel tx_trans kosong.")
         st.stop()
 
-    # Auto-detect PLU
-    with st.spinner("Mendeteksi format PLU di database..."):
-        best_mode, best_count, df_sg_all = detect_best_plu_mode(
-            df_detail, ALL_PLU_SG
-        )
+    plu_name_dict = build_plu_name_dict()
+
+    st.success("Berhasil load " + str(len(plu_name_dict)) + " PLU dari dictionary.")
 
     st.info(
         "Mode PLU terbaik: " + best_mode
@@ -226,7 +225,7 @@ try:
 
         nama_items = []
         for plu in list_plu_di_struk:
-            nm = plu_name_dict.get(plu, "-")
+            nm = get_nama_plu(plu)
             if nm != "-":
                 nama_items.append(nm)
         nama_items_str = " + ".join(nama_items[:3])
