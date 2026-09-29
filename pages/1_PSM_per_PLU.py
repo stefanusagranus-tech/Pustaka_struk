@@ -10,6 +10,7 @@ from utils.common import (
     render_struk_html, generate_pdf, render_print_button,
     get_struk_text, build_plu_name_dict,
 )
+from utils.plu_dict import get_nama_plu, get_plu_normalized
 
 st.set_page_config(
     page_title="PSM per PLU",
