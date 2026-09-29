@@ -265,7 +265,7 @@ c3.metric("📊 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
 # KPI Baris 2 - Transaksi
 st.markdown("##### 🧾 Transaksi")
 c4, c5, c6 = st.columns(3)
-c4.metric("🧾 Total Struk", format(int(total_struk), ","))
+c4.metric("🧾 Total Struk Reguler", format(int(total_struk_reguler), ","))
 c5.metric("📱 Struk Non-Commerce", format(int(total_trx_noncommerce), ","))
 c6.metric("📦 Total Item", format(int(total_item), ","))
 
