@@ -472,8 +472,17 @@ PLU_NAMES = {
     453458: "PANTENE SHP MRCL COLLAGEN 145ML",
     453459: "PANTENE SHP MRCL BIOTIN 145ML",
 }
-
-
+    # ============================================================
+    # GRUP 37: PLU SUGER (Tebus Murah)
+    # ============================================================
+    120333: "PUCUK HARUM TEH PET 350ML",
+    407443: "SOSRO TEH BOTOL TAWAR PET 350ML",
+    125338: "ICHI OCHA GREEN TEA PET 350ML",
+    444255: "ULTRA TEH KOTAK LECI TP 300ML",
+    444254: "ULTRA TEH KOTAK MANGGA TP 300ML",
+    410515: "ULTRA TEH KOTAK LEMON TP 300ML",
+    414351: "KUN UHT CHOMALT TPK 100ML",
+}
 # ============================================================
 # FUNGSI BANTU
 # ============================================================
