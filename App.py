@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import os
 import shutil
-from utils.common import extract_zip_and_find_db, load_tables, build_kasir_dict
+from utils.common import extract_zip_and_find_db
+from utils.common import load_tables
+from utils.common import build_kasir_dict
 
 st.set_page_config(
     page_title="Dashboard POS",
@@ -71,9 +73,6 @@ try:
     df_sale = dfs.get("tx_tsale", pd.DataFrame())
     df_card = dfs.get("tx_tsale_card", pd.DataFrame())
     df_connection = dfs.get("log_connection", pd.DataFrame())
-    
-    # Bangun dictionary NIK -> Nama
-    kasir_dict = build_kasir_dict(df_connection)
 except Exception as e:
     st.error("Gagal load database: " + str(e))
     st.stop()
@@ -82,24 +81,23 @@ if df_sale.empty:
     st.error("Tabel tx_tsale kosong atau tidak ditemukan.")
     st.stop()
 
+# Bangun dictionary NIK -> Nama Kasir
+kasir_dict = build_kasir_dict(df_connection)
+
 # ============================================================
 # PREPARE DATA
 # ============================================================
 df_sale["date_tx"] = pd.to_datetime(df_sale["date_tx"], errors="coerce")
 
-# Konversi numerik
-num_cols = ["total_faktur", "cash", "card", "discount", "promo_disc",
-            "charity", "cash_out", "wallet", "ol_payment", "voucher",
-            "total_item"]
+num_cols = [
+    "total_faktur", "cash", "card", "discount", "promo_disc",
+    "charity", "cash_out", "wallet", "ol_payment", "voucher",
+    "total_item",
+]
 for c in num_cols:
     if c in df_sale.columns:
         df_sale[c] = pd.to_numeric(df_sale[c], errors="coerce").fillna(0)
 
-# Member: pakai cust_id (bukan member)
-if "cust_id" in df_sale.columns:
-    df_sale["cust_id_str"] = df_sale["cust_id"].astype(str).str.strip()
-
-# Member: pakai cust_id (bukan member)
 if "cust_id" in df_sale.columns:
     df_sale["cust_id_str"] = df_sale["cust_id"].astype(str).str.strip()
 
@@ -108,6 +106,7 @@ if "cust_id" in df_sale.columns:
 # ============================================================
 st.subheader("📅 Filter Tanggal")
 
+tgl_range = ()
 if df_sale["date_tx"].notna().any():
     min_d = df_sale["date_tx"].min().date()
     max_d = df_sale["date_tx"].max().date()
@@ -129,6 +128,7 @@ else:
     df = df_sale.copy()
 
 st.caption("Menampilkan " + str(len(df)) + " transaksi.")
+
 
 # ============================================================
 # FUNGSI HITUNG CASH KLERK
@@ -189,6 +189,9 @@ if "cust_id" in df.columns:
 else:
     total_sales_member = 0
 
+total_item = df["total_item"].sum() if "total_item" in df.columns else 0
+rata_struk = total_omzet / total_struk if total_struk > 0 else 0
+
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("💰 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
 c2.metric("🧾 Total Struk", format(total_struk, ","))
@@ -198,12 +201,9 @@ c4.metric("💳 Total Debit", "Rp " + format(total_debit, ",.0f"))
 c5, c6, c7, c8 = st.columns(4)
 c5.metric("📱 Total E-Wallet", "Rp " + format(total_ewallet, ",.0f"))
 c6.metric("👥 Sales Member", "Rp " + format(total_sales_member, ",.0f"))
-
-total_item = df["total_item"].sum() if "total_item" in df.columns else 0
-rata_struk = total_omzet / total_struk if total_struk > 0 else 0
-
 c7.metric("📦 Total Item", format(int(total_item), ","))
 c8.metric("📊 Rata-rata/Struk", "Rp " + format(rata_struk, ",.0f"))
+
 
 # ============================================================
 # GRAFIK JAM RAMAI
@@ -212,13 +212,11 @@ st.markdown("---")
 st.subheader("🕐 Jam Ramai Transaksi")
 
 if "time_tx" in df.columns and df["time_tx"].notna().any():
-    # Konversi time_tx ke jam (0-23)
     df_time = df.copy()
 
     def get_hour(t):
         try:
             s = str(t).strip()
-            # Format "HH:MM:SS" atau "HH:MM"
             if ":" in s:
                 return int(s.split(":")[0])
             return None
@@ -230,7 +228,6 @@ if "time_tx" in df.columns and df["time_tx"].notna().any():
     df_time["jam"] = df_time["jam"].astype(int)
 
     if not df_time.empty:
-        # Hitung jumlah transaksi per jam
         per_jam = (
             df_time.groupby("jam")["faktur"]
             .nunique()
@@ -238,16 +235,13 @@ if "time_tx" in df.columns and df["time_tx"].notna().any():
             .rename(columns={"faktur": "Jumlah_Transaksi"})
         )
 
-        # Lengkapi semua jam 0-23
         all_hours = pd.DataFrame({"jam": range(24)})
         per_jam = all_hours.merge(per_jam, on="jam", how="left").fillna(0)
         per_jam["Jumlah_Transaksi"] = per_jam["Jumlah_Transaksi"].astype(int)
 
-        # Bar chart
         chart_data = per_jam.set_index("jam")["Jumlah_Transaksi"]
         st.bar_chart(chart_data, use_container_width=True)
 
-        # Cari jam teramai & tersepi (hanya dari jam yang ada transaksi)
         per_jam_aktif = per_jam[per_jam["Jumlah_Transaksi"] > 0]
 
         if not per_jam_aktif.empty:
@@ -261,7 +255,7 @@ if "time_tx" in df.columns and df["time_tx"].notna().any():
             col_a, col_b = st.columns(2)
             with col_a:
                 st.success(
-                    "🔥 **Jam Teramai:** "
+                    "🔥 Jam Teramai: "
                     + str(int(jam_teramai["jam"])).zfill(2) + ":00"
                     + " — "
                     + str(int(jam_teramai["Jumlah_Transaksi"]))
@@ -269,14 +263,13 @@ if "time_tx" in df.columns and df["time_tx"].notna().any():
                 )
             with col_b:
                 st.warning(
-                    "❄️ **Jam Tersepi:** "
+                    "❄️ Jam Tersepi: "
                     + str(int(jam_tersepi["jam"])).zfill(2) + ":00"
                     + " — "
                     + str(int(jam_tersepi["Jumlah_Transaksi"]))
                     + " transaksi"
                 )
 
-            # Tabel distribusi per jam
             with st.expander("📋 Lihat Distribusi per Jam"):
                 per_jam_display = per_jam.copy()
                 per_jam_display["Jam"] = per_jam_display["jam"].apply(
@@ -304,7 +297,6 @@ if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.colum
         df_card_temp["amount"], errors="coerce"
     ).fillna(0)
 
-    # Filter tanggal
     if "date_tx" in df_card_temp.columns:
         df_card_temp["date_tx"] = pd.to_datetime(
             df_card_temp["date_tx"], errors="coerce"
@@ -315,7 +307,6 @@ if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.colum
                 & (df_card_temp["date_tx"].dt.date <= tgl_range[1])
             ]
 
-    # Mapping kode bank ke nama
     BANK_MAP = {
         1: "BCA",
         2: "Mandiri",
@@ -325,15 +316,6 @@ if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.colum
         6: "Danamon",
         7: "Permata",
         8: "Maybank",
-        9: "BCA (2)",
-        10: "Mandiri (2)",
-        11: "BNI (2)",
-        12: "BRI (2)",
-        13: "BCA (3)",
-        14: "Mandiri (3)",
-        15: "BNI (3)",
-        16: "BRI (3)",
-        17: "Lainnya",
     }
 
     def get_bank_name(bank_code):
@@ -345,7 +327,6 @@ if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.colum
 
     df_card_temp["Nama_Bank"] = df_card_temp["bank"].apply(get_bank_name)
 
-    # Group by nama bank
     rekap_bank = (
         df_card_temp.groupby("Nama_Bank")
         .agg(
@@ -357,23 +338,20 @@ if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.colum
     )
 
     if not rekap_bank.empty:
-        # Bar chart
         chart_bank = rekap_bank.set_index("Nama_Bank")["Total_Nominal"]
         st.bar_chart(chart_bank, use_container_width=True)
 
-        # Tabel
         rekap_bank_display = rekap_bank.copy()
         rekap_bank_display["Total_Nominal"] = rekap_bank_display["Total_Nominal"].apply(
             lambda x: "Rp " + format(x, ",.0f")
         )
         st.dataframe(rekap_bank_display, use_container_width=True, hide_index=True)
 
-        # Total debit
         total_debit_bank = df_card_temp["amount"].sum()
         st.info(
-            "Total Debit: **Rp " + format(total_debit_bank, ",.0f")
-            + "** dari **" + str(df_card_temp["faktur"].nunique())
-            + "** transaksi"
+            "Total Debit: Rp " + format(total_debit_bank, ",.0f")
+            + " dari " + str(df_card_temp["faktur"].nunique())
+            + " transaksi"
         )
     else:
         st.info("Tidak ada transaksi debit di rentang tanggal ini.")
@@ -388,7 +366,6 @@ st.markdown("---")
 st.subheader("👤 Rekapitulasi per Kasir")
 
 if "user_id" in df.columns:
-    # Siapkan kolom is_member dari cust_id
     if "cust_id" in df.columns:
         df["is_member"] = df["cust_id"].apply(
             lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
@@ -397,24 +374,17 @@ if "user_id" in df.columns:
     else:
         df["is_member"] = False
 
-    # Agregasi
     agg_rows = []
     for kasir, grp in df.groupby("user_id"):
-        # Sales Personil
         sales_personil = grp["total_faktur"].sum()
-
-        # STD Personil
         std_personil = grp["faktur"].nunique()
 
-        # Sales Member
         grp_member = grp[grp["is_member"] == True]
         sales_member = grp_member["total_faktur"].sum() if not grp_member.empty else 0
         std_member = grp_member["faktur"].nunique() if not grp_member.empty else 0
 
-        # Cash Klerk
         cash_klerk = hitung_cash_klerk(grp)
 
-        # Debit (dari df_card, filter per kasir)
         total_debit_kasir = 0
         if not df_card.empty and "user_id" in df_card.columns:
             df_card_k = df_card.copy()
@@ -433,12 +403,11 @@ if "user_id" in df.columns:
             df_card_k = df_card_k[df_card_k["user_id"].astype(str) == str(kasir)]
             total_debit_kasir = df_card_k["amount"].sum()
 
-        # E-Wallet
         ewallet_kasir = grp["wallet"].sum() if "wallet" in grp.columns else 0
 
         nik = str(kasir)
         nama_kasir = kasir_dict.get(nik, "-")
-        
+
         agg_rows.append({
             "NIK": nik,
             "Nama_Kasir": nama_kasir,
@@ -455,7 +424,6 @@ if "user_id" in df.columns:
         "Sales_Personil", ascending=False
     ).reset_index(drop=True)
 
-    # Tampilkan dalam format tabel yang rapi
     rekap_display = rekap_kasir.copy()
     rekap_display["Sales_Personil"] = rekap_display["Sales_Personil"].apply(
         lambda x: "Rp " + format(x, ",.0f")
@@ -472,8 +440,7 @@ if "user_id" in df.columns:
     rekap_display["E_Wallet"] = rekap_display["E_Wallet"].apply(
         lambda x: "Rp " + format(x, ",.0f")
     )
-    
-    st.caption("Terdeteksi " + str(len(kasir_dict)) + " kasir dari log_connection.")
+
     rekap_display = rekap_display.rename(columns={
         "NIK": "NIK",
         "Nama_Kasir": "Nama Kasir",
@@ -485,10 +452,9 @@ if "user_id" in df.columns:
         "E_Wallet": "E-Wallet",
     })
 
+    st.caption("Terdeteksi " + str(len(kasir_dict)) + " kasir dari log_connection.")
     st.dataframe(rekap_display, use_container_width=True, hide_index=True)
 
-    # Total baris
-    st.markdown("**Total:**")
     total_row = pd.DataFrame([{
         "NIK": "TOTAL",
         "Nama Kasir": "-",
@@ -502,7 +468,6 @@ if "user_id" in df.columns:
     }])
     st.dataframe(total_row, use_container_width=True, hide_index=True)
 
-    # Download CSV
     csv = rekap_kasir.to_csv(index=False).encode("utf-8")
     st.download_button(
         "Download Rekap Kasir (CSV)",
@@ -520,7 +485,7 @@ else:
 st.markdown("---")
 st.markdown("### 📌 Halaman Lain")
 st.markdown(
-    "Buka **sidebar kiri** untuk: "
+    "Buka **sidebar kiri** untuk:\n"
     "- **1 PSM per PLU** — Laporan PSM berdasarkan PLU\n"
     "- **2 SG per Paket** — Laporan Serba Gratis per paket"
 )
@@ -532,6 +497,10 @@ st.markdown(
 with st.expander("🔍 Debug"):
     st.write("Total baris tx_tsale: " + str(len(df_sale)))
     st.write("Total baris tx_tsale_card: " + str(len(df_card)))
+    st.write("Total baris log_connection: " + str(len(df_connection)))
+    st.write("Jumlah kasir di kasir_dict: " + str(len(kasir_dict)))
+    st.write("Contoh kasir_dict: ", dict(list(kasir_dict.items())[:5]))
     st.write("Rentang tanggal: " + str(tgl_range))
     st.write("Kolom tx_tsale: ", df_sale.columns.tolist())
     st.write("Kolom tx_tsale_card: ", df_card.columns.tolist() if not df_card.empty else "kosong")
+    st.write("Kolom log_connection: ", df_connection.columns.tolist() if not df_connection.empty else "kosong")
