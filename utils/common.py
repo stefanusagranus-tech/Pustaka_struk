@@ -549,10 +549,6 @@ def build_kasir_dict(df_connection):
     return kasir_dict
     
 def build_kasir_dict_from_receipt(df_receipt):
-    """
-    Bangun dictionary {NIK: Nama Kasir} dari log_receipt_prn.body1.
-    Parse pola 'Kasir : NAMA' di body1.
-    """
     if df_receipt is None or df_receipt.empty:
         return {}
 
@@ -573,11 +569,9 @@ def build_kasir_dict_from_receipt(df_receipt):
         if not body1 or body1 in ("nan", "None", ""):
             continue
 
-        # Cari pola "Kasir : NAMA" di body1
         m = re.search(r"Kasir\s*:\s*([A-Za-z\s\.\']+)", body1)
         if m:
             nama = m.group(1).strip()
-            # Bersihkan (kadang ada karakter tambahan)
             nama = re.split(r"[|\n]", nama)[0].strip()
 
             if nama and user_id not in kasir_dict:
