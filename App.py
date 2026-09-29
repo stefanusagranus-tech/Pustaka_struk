@@ -63,6 +63,7 @@ def get_data(db_path):
         "tx_tsale_card",
         "tx_trans",
         "log_receipt_prn",
+        "tx_trans_non_commerce",
     ]
     dfs = load_tables(db_path, tables)
     return dfs
@@ -73,6 +74,7 @@ try:
     df_sale = dfs.get("tx_tsale", pd.DataFrame())
     df_card = dfs.get("tx_tsale_card", pd.DataFrame())
     df_receipt = dfs.get("log_receipt_prn", pd.DataFrame())
+    df_noncommerce = dfs.get("tx_trans_non_commerce", pd.DataFrame())
 except Exception as e:
     st.error("Gagal load database: " + str(e))
     st.stop()
@@ -101,6 +103,26 @@ for c in num_cols:
 if "cust_id" in df_sale.columns:
     df_sale["cust_id_str"] = df_sale["cust_id"].astype(str).str.strip()
 
+# Prepare non-commerce
+if not df_noncommerce.empty:
+    if "date_tx" in df_noncommerce.columns:
+        df_noncommerce["date_tx"] = pd.to_datetime(
+            df_noncommerce["date_tx"], errors="coerce"
+        )
+    for c in ["price", "qty", "disc"]:
+        if c in df_noncommerce.columns:
+            df_noncommerce[c] = pd.to_numeric(
+                df_noncommerce[c], errors="coerce"
+            ).fillna(0)
+
+    df_noncommerce["total_bayar"] = (
+        df_noncommerce["price"] * df_noncommerce["qty"]
+    )
+    if "disc" in df_noncommerce.columns:
+        df_noncommerce["total_bayar"] = (
+            df_noncommerce["total_bayar"] - df_noncommerce["disc"]
+        )
+
 # ============================================================
 # FILTER TANGGAL
 # ============================================================
@@ -122,6 +144,13 @@ if df_sale["date_tx"].notna().any():
             df_sale["date_tx"].dt.date >= tgl_range[0]
         ) & (df_sale["date_tx"].dt.date <= tgl_range[1])
         df = df_sale[mask].copy()
+
+        # Filter non-commerce
+        if not df_noncommerce.empty and "date_tx" in df_noncommerce.columns:
+            df_noncommerce = df_noncommerce[
+                (df_noncommerce["date_tx"].dt.date >= tgl_range[0])
+                & (df_noncommerce["date_tx"].dt.date <= tgl_range[1])
+            ]
     else:
         df = df_sale.copy()
 else:
@@ -152,6 +181,34 @@ def hitung_cash_klerk(df_sub):
 
 
 # ============================================================
+# HITUNG NON-COMMERCE
+# ============================================================
+if not df_noncommerce.empty:
+    total_noncommerce = df_noncommerce["total_bayar"].sum()
+    total_trx_noncommerce = df_noncommerce["bill_no"].nunique()
+else:
+    total_noncommerce = 0
+    total_trx_noncommerce = 0
+
+# Non-commerce per kasir
+noncommerce_per_kasir = {}
+if not df_noncommerce.empty and "user_id" in df_noncommerce.columns:
+    nc_group = (
+        df_noncommerce.groupby("user_id")
+        .agg(
+            Total_NC=("total_bayar", "sum"),
+            Jumlah_NC=("bill_no", "nunique"),
+        )
+        .reset_index()
+    )
+    for _, r in nc_group.iterrows():
+        noncommerce_per_kasir[str(r["user_id"])] = {
+            "total": r["Total_NC"],
+            "jumlah": r["Jumlah_NC"],
+        }
+
+
+# ============================================================
 # KPI UTAMA
 # ============================================================
 st.markdown("---")
@@ -161,6 +218,11 @@ total_omzet = df["total_faktur"].sum()
 total_struk = df["faktur"].nunique()
 total_cash_klerk = hitung_cash_klerk(df)
 
+# Omzet reguler = total - non-commerce
+total_omzet_reguler = total_omzet - total_noncommerce
+total_struk_reguler = total_struk - total_trx_noncommerce
+
+# Debit total
 total_debit = 0
 if not df_card.empty and "amount" in df_card.columns:
     df_card_temp = df_card.copy()
@@ -190,19 +252,30 @@ else:
     total_sales_member = 0
 
 total_item = df["total_item"].sum() if "total_item" in df.columns else 0
-rata_struk = total_omzet / total_struk if total_struk > 0 else 0
+rata_struk = total_omzet_reguler / total_struk_reguler if total_struk_reguler > 0 else 0
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("💰 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
-c2.metric("🧾 Total Struk", format(total_struk, ","))
-c3.metric("💵 Cash Klerk", "Rp " + format(total_cash_klerk, ",.0f"))
-c4.metric("💳 Total Debit", "Rp " + format(total_debit, ",.0f"))
 
-c5, c6, c7, c8 = st.columns(4)
-c5.metric("📱 Total E-Wallet", "Rp " + format(total_ewallet, ",.0f"))
-c6.metric("👥 Sales Member", "Rp " + format(total_sales_member, ",.0f"))
-c7.metric("📦 Total Item", format(int(total_item), ","))
-c8.metric("📊 Rata-rata/Struk", "Rp " + format(rata_struk, ",.0f"))
+# KPI Baris 1 - Omzet
+st.markdown("##### 💰 Omzet")
+c1, c2, c3 = st.columns(3)
+c1.metric("💰 Omzet Reguler", "Rp " + format(total_omzet_reguler, ",.0f"))
+c2.metric("📱 Omzet Non-Commerce", "Rp " + format(total_noncommerce, ",.0f"))
+c3.metric("📊 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
+
+# KPI Baris 2 - Transaksi
+st.markdown("##### 🧾 Transaksi")
+c4, c5, c6 = st.columns(3)
+c4.metric("🧾 Total Struk", format(int(total_struk), ","))
+c5.metric("📱 Struk Non-Commerce", format(int(total_trx_noncommerce), ","))
+c6.metric("📦 Total Item", format(int(total_item), ","))
+
+# KPI Baris 3 - Pembayaran
+st.markdown("##### 💳 Pembayaran")
+c7, c8, c9, c10 = st.columns(4)
+c7.metric("💵 Cash Klerk", "Rp " + format(total_cash_klerk, ",.0f"))
+c8.metric("💳 Total Debit", "Rp " + format(total_debit, ",.0f"))
+c9.metric("📱 Total E-Wallet", "Rp " + format(total_ewallet, ",.0f"))
+c10.metric("👥 Sales Member", "Rp " + format(total_sales_member, ",.0f"))
 
 
 # ============================================================
@@ -286,7 +359,7 @@ else:
 
 
 # ============================================================
-# BREAKDOWN DEBIT PER BANK
+# BREAKDOWN DEBIT PER BANK (BCA & YOKKE)
 # ============================================================
 st.markdown("---")
 st.subheader("💳 Sales Debit per Bank")
@@ -307,25 +380,19 @@ if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.colum
                 & (df_card_temp["date_tx"].dt.date <= tgl_range[1])
             ]
 
-    BANK_MAP = {
-        1: "BCA",
-        2: "Mandiri",
-        3: "BNI",
-        4: "BRI",
-        5: "CIMB Niaga",
-        6: "Danamon",
-        7: "Permata",
-        8: "Maybank",
-    }
+    # Hanya 2 kategori: BCA (kode 1) & Yokke (sisanya)
+    KODE_BCA = 1
 
-    def get_bank_name(bank_code):
+    def get_bank_kategori(bank_code):
         try:
             code = int(float(bank_code))
-            return BANK_MAP.get(code, "Bank #" + str(code))
+            if code == KODE_BCA:
+                return "BCA"
+            return "Yokke"
         except Exception:
-            return "Tidak diketahui"
+            return "Yokke"
 
-    df_card_temp["Nama_Bank"] = df_card_temp["bank"].apply(get_bank_name)
+    df_card_temp["Nama_Bank"] = df_card_temp["bank"].apply(get_bank_kategori)
 
     rekap_bank = (
         df_card_temp.groupby("Nama_Bank")
@@ -376,8 +443,17 @@ if "user_id" in df.columns:
 
     agg_rows = []
     for kasir, grp in df.groupby("user_id"):
-        sales_personil = grp["total_faktur"].sum()
+        sales_total = grp["total_faktur"].sum()
+
+        nik_str = str(kasir)
+        nc_data = noncommerce_per_kasir.get(nik_str, {"total": 0, "jumlah": 0})
+        sales_nc = nc_data["total"]
+        jumlah_nc = nc_data["jumlah"]
+
+        sales_reguler = sales_total - sales_nc
+
         std_personil = grp["faktur"].nunique()
+        std_reguler = std_personil - jumlah_nc
 
         grp_member = grp[grp["is_member"] == True]
         sales_member = grp_member["total_faktur"].sum() if not grp_member.empty else 0
@@ -400,19 +476,20 @@ if "user_id" in df.columns:
                         (df_card_k["date_tx"].dt.date >= tgl_range[0])
                         & (df_card_k["date_tx"].dt.date <= tgl_range[1])
                     ]
-            df_card_k = df_card_k[df_card_k["user_id"].astype(str) == str(kasir)]
+            df_card_k = df_card_k[df_card_k["user_id"].astype(str) == nik_str]
             total_debit_kasir = df_card_k["amount"].sum()
 
         ewallet_kasir = grp["wallet"].sum() if "wallet" in grp.columns else 0
 
-        nik = str(kasir)
-        nama_kasir = kasir_dict.get(nik, "-")
+        nama_kasir = kasir_dict.get(nik_str, "-")
 
         agg_rows.append({
-            "NIK": nik,
+            "NIK": nik_str,
             "Nama_Kasir": nama_kasir,
-            "Sales_Personil": sales_personil,
-            "STD_Personil": int(std_personil),
+            "Sales_Reguler": sales_reguler,
+            "Sales_NonCommerce": sales_nc,
+            "STD_Reguler": int(std_reguler),
+            "STD_NonCommerce": int(jumlah_nc),
             "Sales_Member": sales_member,
             "STD_Member": int(std_member),
             "Cash_Klerk": cash_klerk,
@@ -421,11 +498,14 @@ if "user_id" in df.columns:
         })
 
     rekap_kasir = pd.DataFrame(agg_rows).sort_values(
-        "Sales_Personil", ascending=False
+        "Sales_Reguler", ascending=False
     ).reset_index(drop=True)
 
     rekap_display = rekap_kasir.copy()
-    rekap_display["Sales_Personil"] = rekap_display["Sales_Personil"].apply(
+    rekap_display["Sales_Reguler"] = rekap_display["Sales_Reguler"].apply(
+        lambda x: "Rp " + format(x, ",.0f")
+    )
+    rekap_display["Sales_NonCommerce"] = rekap_display["Sales_NonCommerce"].apply(
         lambda x: "Rp " + format(x, ",.0f")
     )
     rekap_display["Sales_Member"] = rekap_display["Sales_Member"].apply(
@@ -444,8 +524,10 @@ if "user_id" in df.columns:
     rekap_display = rekap_display.rename(columns={
         "NIK": "NIK",
         "Nama_Kasir": "Nama Kasir",
-        "Sales_Personil": "Sales Personil",
-        "STD_Personil": "STD Personil",
+        "Sales_Reguler": "Sales Reguler",
+        "Sales_NonCommerce": "Sales Non-Commerce",
+        "STD_Reguler": "STD Reguler",
+        "STD_NonCommerce": "STD Non-Commerce",
         "Sales_Member": "Sales Member",
         "STD_Member": "STD Member",
         "Cash_Klerk": "Cash Klerk",
@@ -458,8 +540,10 @@ if "user_id" in df.columns:
     total_row = pd.DataFrame([{
         "NIK": "TOTAL",
         "Nama Kasir": "-",
-        "Sales Personil": "Rp " + format(rekap_kasir["Sales_Personil"].sum(), ",.0f"),
-        "STD Personil": int(rekap_kasir["STD_Personil"].sum()),
+        "Sales Reguler": "Rp " + format(rekap_kasir["Sales_Reguler"].sum(), ",.0f"),
+        "Sales Non-Commerce": "Rp " + format(rekap_kasir["Sales_NonCommerce"].sum(), ",.0f"),
+        "STD Reguler": int(rekap_kasir["STD_Reguler"].sum()),
+        "STD Non-Commerce": int(rekap_kasir["STD_NonCommerce"].sum()),
         "Sales Member": "Rp " + format(rekap_kasir["Sales_Member"].sum(), ",.0f"),
         "STD Member": int(rekap_kasir["STD_Member"].sum()),
         "Cash Klerk": "Rp " + format(rekap_kasir["Cash_Klerk"].sum(), ",.0f"),
@@ -487,7 +571,10 @@ st.markdown("### 📌 Halaman Lain")
 st.markdown(
     "Buka **sidebar kiri** untuk:\n"
     "- **1 PSM per PLU** — Laporan PSM berdasarkan PLU\n"
-    "- **2 SG per Paket** — Laporan Serba Gratis per paket"
+    "- **2 SG per Paket** — Laporan Serba Gratis per paket\n"
+    "- **3 Topup Flaz** — Laporan topup Flaz\n"
+    "- **4 Cek Struk** — Cek struk by flag\n"
+    "- **5 Void Transaksi** — Laporan void"
 )
 
 
@@ -498,9 +585,13 @@ with st.expander("🔍 Debug"):
     st.write("Total baris tx_tsale: " + str(len(df_sale)))
     st.write("Total baris tx_tsale_card: " + str(len(df_card)))
     st.write("Total baris log_receipt_prn: " + str(len(df_receipt)))
+    st.write("Total baris tx_trans_non_commerce: " + str(len(df_noncommerce)))
     st.write("Jumlah kasir di kasir_dict: " + str(len(kasir_dict)))
     st.write("Contoh kasir_dict: ", dict(list(kasir_dict.items())[:5]))
     st.write("Rentang tanggal: " + str(tgl_range))
+    st.write("Total Omzet: Rp " + format(total_omzet, ",.0f"))
+    st.write("Omzet Reguler: Rp " + format(total_omzet_reguler, ",.0f"))
+    st.write("Omzet Non-Commerce: Rp " + format(total_noncommerce, ",.0f"))
     st.write("Kolom tx_tsale: ", df_sale.columns.tolist())
     st.write("Kolom tx_tsale_card: ", df_card.columns.tolist() if not df_card.empty else "kosong")
-    st.write("Kolom log_receipt_prn: ", df_receipt.columns.tolist() if not df_receipt.empty else "kosong")
+    st.write("Kolom tx_trans_non_commerce: ", df_noncommerce.columns.tolist() if not df_noncommerce.empty else "kosong")
