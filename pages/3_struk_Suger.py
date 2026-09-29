@@ -90,7 +90,6 @@ try:
     # ============================================================
     df_detail["plu_asli"] = pd.to_numeric(df_detail["plu"], errors="coerce")
 
-    # Coba semua mode normalisasi, pilih yang paling banyak match
     modes = ["asli", "buang_1", "buang_2", "div_10", "div_100"]
     best_mode = "buang_1"
     best_count = 0
@@ -126,17 +125,19 @@ try:
         df_detail[df_detail["is_redeem"]]["bill_str"].unique()
     )
 
-    # Tandai di tx_tsale (pakai faktur dulu, fallback ke bill_no)
+    # Di tx_tsale, tambahkan bill_no (kalau belum ada)
     df_sale["bill_str"] = df_sale["faktur"].astype(str).str.strip()
 
     # Mapping faktur -> bill_no dari log_receipt_prn
     bill_to_no = {}
+    faktur_to_no = {}
     if not df_receipt.empty and "bill_no" in df_receipt.columns:
         import re
         df_receipt_copy = df_receipt.copy()
         if "body1" in df_receipt_copy.columns:
             for _, r in df_receipt_copy.iterrows():
-                b = str(r["bill_no"]).strip().zfill(4)
+                b = str(r["bill_no"]).strip()
+                b_z = b.zfill(4)
                 body = str(r.get("body1", "")) + str(r.get("header", ""))
                 m = re.search(r"C383-(\d+-\d+[A-Z0-9]+)", body)
                 if m:
@@ -146,15 +147,26 @@ try:
                     else:
                         faktur = part
                     bill_to_no[faktur] = b
+                    faktur_to_no[faktur] = b
 
-    # Tambahkan bill_no ke tx_tsale
+    # Ambil bill_no dari tx_trans (lebih akurat, karena tx_trans punya bill_no)
     df_sale["bill_no"] = df_sale["faktur"].apply(
         lambda x: bill_to_no.get(str(x).strip(), "")
     )
 
-    # Tandai redeem berdasarkan bill_no atau faktur
+    # Kalau masih kosong, coba cari bill_no dari tx_trans yang faktur-nya sama
+    # (kadang faktur di tx_tsale = bill_no di tx_trans, cuma beda format)
+    if df_sale["bill_no"].astype(str).str.strip().eq("").all():
+        # Fallback: extract 3 digit terakhir dari faktur
+        import re
+        df_sale["bill_no"] = df_sale["faktur"].apply(
+            lambda x: (re.search(r"(\d+)$", str(x)).group(1).lstrip("0")
+                       if re.search(r"(\d+)$", str(x)) else "")
+        )
+
+    # Tandai redeem berdasarkan bill_no
     df_sale["is_redeem"] = (
-        df_sale["bill_no"].astype(str).isin(bill_redeem_set)
+        df_sale["bill_no"].astype(str).str.strip().isin(bill_redeem_set)
     )
 
     # Nama item per bill (untuk review)
@@ -321,94 +333,120 @@ try:
     )
 
     # ============================================================
-    # LIHAT STRUK
+    # REVIEW STRUK - PAKAI BILL_NO (SEPERTI CEK STRUK)
     # ============================================================
     st.markdown("---")
-    st.subheader("🧾 Lihat Struk")
+    st.subheader("🧾 Review Struk Suger")
+    st.write("Klik bon untuk lihat struk:")
 
-    # Pakai faktur (bukan bill_no) — karena bill_no mungkin kosong
-    list_faktur = df_review["faktur"].dropna().unique().tolist()
-    list_faktur = [f for f in list_faktur if str(f).strip() != ""]
+    list_bill_review = sorted(
+        df_review["bill_no"].dropna().unique().tolist(),
+        reverse=True
+    )
+    list_bill_review = [b for b in list_bill_review if str(b).strip() != ""]
 
-    if list_faktur:
-        selected_faktur = st.selectbox(
-            "Pilih Faktur:",
-            options=list_faktur,
-            key="suger_faktur_select",
-        )
-
-        if selected_faktur:
-            row = df_review[df_review["faktur"] == selected_faktur].iloc[0]
-
-            col_a, col_b, col_c = st.columns(3)
-            col_a.metric("Faktur", str(selected_faktur))
-            col_b.metric(
-                "Total Belanja",
-                "Rp " + format(row["total_belanja"], ",.0f")
-            )
-            col_c.metric("Status", row["status"])
-
-            # Cari bill_no dari log_receipt_prn (scan body1)
-            bill_no = None
-            if not df_receipt.empty and "bill_no" in df_receipt.columns:
-                for _, r in df_receipt.iterrows():
-                    body = str(r.get("body1", "")) + str(r.get("header", ""))
-                    if str(selected_faktur) in body:
-                        bill_no = str(r["bill_no"]).strip()
-                        break
-
-            if bill_no is None:
-                # Fallback: coba dari faktur (ambil 3 digit terakhir)
-                import re
-                m = re.search(r"(\d+)$", str(selected_faktur))
-                if m:
-                    bill_no = m.group(1).lstrip("0")
-                else:
-                    bill_no = selected_faktur
-
-            struk_result = get_struk_text(df_receipt, bill_no)
-
-            if struk_result and struk_result[0]:
-                full_receipt_text, raw_text = struk_result
-
-                st.markdown("### Struk Faktur " + str(selected_faktur))
-                receipt_html = render_struk_html(full_receipt_text)
-                components.html(receipt_html, height=650, scrolling=True)
-
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.download_button(
-                        "📥 TXT",
-                        data=full_receipt_text,
-                        file_name="struk_" + str(selected_faktur) + ".txt",
-                        mime="text/plain",
-                        use_container_width=True,
-                        key="suger_txt_" + str(selected_faktur),
-                    )
-                with col2:
-                    try:
-                        pdf_bytes = generate_pdf(full_receipt_text)
-                        st.download_button(
-                            "📄 PDF",
-                            data=pdf_bytes,
-                            file_name="struk_" + str(selected_faktur) + ".pdf",
-                            mime="application/pdf",
-                            use_container_width=True,
-                            key="suger_pdf_" + str(selected_faktur),
-                        )
-                    except ImportError:
-                        st.info("Install fpdf2 untuk PDF")
-                    except Exception as e:
-                        st.warning("PDF error: " + str(e))
-                with col3:
-                    print_html = render_print_button(full_receipt_text)
-                    with st.popover("🖨️ Cetak", use_container_width=True):
-                        st.write("Klik tombol di bawah untuk print:")
-                        components.html(print_html, height=80)
-            else:
-                st.warning("Struk tidak ditemukan untuk faktur " + str(selected_faktur))
+    if not list_bill_review:
+        st.info("Tidak ada bill_no di data review.")
     else:
-        st.info("Tidak ada faktur di data review.")
+        st.caption("Tersedia " + str(len(list_bill_review)) + " bon")
+
+        if "suger_selected_bill" not in st.session_state:
+            st.session_state["suger_selected_bill"] = None
+
+        cols_per_row = 6
+        list_show = list_bill_review[:60]
+
+        for i in range(0, len(list_show), cols_per_row):
+            chunk = list_show[i:i + cols_per_row]
+            cols = st.columns(len(chunk))
+            for col, bill in zip(cols, chunk):
+                df_b = df_review[df_review["bill_no"] == bill]
+                if df_b.empty:
+                    label = str(bill)
+                else:
+                    status_b = df_b.iloc[0]["status"]
+                    if status_b == "Syarat + Redeem":
+                        label = "🎁 " + str(bill)
+                    elif status_b == "Syarat (Tidak Redeem)":
+                        label = "✅ " + str(bill)
+                    else:
+                        label = "❌ " + str(bill)
+
+                btn_key = "suger_btn_" + str(bill)
+                if col.button(label, key=btn_key, use_container_width=True):
+                    st.session_state["suger_selected_bill"] = bill
+
+        if len(list_bill_review) > 60:
+            st.caption("Menampilkan 60 bon pertama.")
+
+        # ============================================================
+        # TAMPILKAN STRUK JIKA DIPILIH
+        # ============================================================
+        sel = st.session_state.get("suger_selected_bill")
+
+        if sel:
+            df_b = df_review[df_review["bill_no"] == sel]
+            if not df_b.empty:
+                row = df_b.iloc[0]
+
+                st.markdown("---")
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("Bill No", str(sel))
+                col_b.metric(
+                    "Total Belanja",
+                    "Rp " + format(row["total_belanja"], ",.0f")
+                )
+                col_c.metric("Status", row["status"])
+
+                # Panggil struk pakai bill_no langsung
+                struk_result = get_struk_text(df_receipt, sel)
+
+                if struk_result and struk_result[0]:
+                    full_receipt_text, raw_text = struk_result
+
+                    st.markdown("### Struk Bon " + str(sel))
+                    receipt_html = render_struk_html(full_receipt_text)
+                    components.html(receipt_html, height=650, scrolling=True)
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.download_button(
+                            "📥 TXT",
+                            data=full_receipt_text,
+                            file_name="struk_bon_" + str(sel) + ".txt",
+                            mime="text/plain",
+                            use_container_width=True,
+                            key="suger_txt_" + str(sel),
+                        )
+                    with col2:
+                        try:
+                            pdf_bytes = generate_pdf(full_receipt_text)
+                            st.download_button(
+                                "📄 PDF",
+                                data=pdf_bytes,
+                                file_name="struk_bon_" + str(sel) + ".pdf",
+                                mime="application/pdf",
+                                use_container_width=True,
+                                key="suger_pdf_" + str(sel),
+                            )
+                        except ImportError:
+                            st.info("Install fpdf2 untuk PDF")
+                        except Exception as e:
+                            st.warning("PDF error: " + str(e))
+                    with col3:
+                        print_html = render_print_button(full_receipt_text)
+                        with st.popover("🖨️ Cetak", use_container_width=True):
+                            st.write("Klik tombol di bawah untuk print:")
+                            components.html(print_html, height=80)
+                else:
+                    st.warning(
+                        "Struk tidak ditemukan untuk bill " + str(sel)
+                        + ". Coba bill lain."
+                    )
+            else:
+                st.info("Bon tidak ditemukan di data review.")
+        else:
+            st.info("Klik salah satu bon di atas untuk melihat struknya.")
 
     # ============================================================
     # DEBUG
@@ -421,6 +459,8 @@ try:
         st.write("Baris redeem (PLU match + promo_disc > 0): " + str(df_detail["is_redeem"].sum()))
         st.write("Bill redeem: " + str(len(bill_redeem_set)))
         st.write("Contoh bill redeem: " + str(list(bill_redeem_set)[:10]))
+        st.write("Total bill_no di review: " + str(len(list_bill_review)))
+        st.write("Contoh bill_no di review: " + str(list_bill_review[:10]))
 
         st.write("**10 baris tx_trans dengan PLU Suger:**")
         if df_detail["is_suger_item"].sum() > 0:
