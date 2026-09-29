@@ -60,6 +60,7 @@ def get_data(db_path):
         "tx_tsale",
         "tx_tsale_card",
         "tx_trans",
+        "log_connection",
     ]
     dfs = load_tables(db_path, tables)
     return dfs
@@ -69,6 +70,10 @@ try:
     dfs = get_data(st.session_state["db_path"])
     df_sale = dfs.get("tx_tsale", pd.DataFrame())
     df_card = dfs.get("tx_tsale_card", pd.DataFrame())
+    df_connection = dfs.get("log_connection", pd.DataFrame())
+    
+    # Bangun dictionary NIK -> Nama
+    kasir_dict = build_kasir_dict(df_connection)
 except Exception as e:
     st.error("Gagal load database: " + str(e))
     st.stop()
@@ -431,8 +436,12 @@ if "user_id" in df.columns:
         # E-Wallet
         ewallet_kasir = grp["wallet"].sum() if "wallet" in grp.columns else 0
 
+        nik = str(kasir)
+        nama_kasir = kasir_dict.get(nik, "-")
+        
         agg_rows.append({
-            "Kasir": str(kasir),
+            "NIK": nik,
+            "Nama_Kasir": nama_kasir,
             "Sales_Personil": sales_personil,
             "STD_Personil": int(std_personil),
             "Sales_Member": sales_member,
@@ -463,8 +472,11 @@ if "user_id" in df.columns:
     rekap_display["E_Wallet"] = rekap_display["E_Wallet"].apply(
         lambda x: "Rp " + format(x, ",.0f")
     )
-
+    
+    st.caption("Terdeteksi " + str(len(kasir_dict)) + " kasir dari log_connection.")
     rekap_display = rekap_display.rename(columns={
+        "NIK": "NIK",
+        "Nama_Kasir": "Nama Kasir",
         "Sales_Personil": "Sales Personil",
         "STD_Personil": "STD Personil",
         "Sales_Member": "Sales Member",
@@ -478,7 +490,8 @@ if "user_id" in df.columns:
     # Total baris
     st.markdown("**Total:**")
     total_row = pd.DataFrame([{
-        "Kasir": "TOTAL",
+        "NIK": "TOTAL",
+        "Nama Kasir": "-",
         "Sales Personil": "Rp " + format(rekap_kasir["Sales_Personil"].sum(), ",.0f"),
         "STD Personil": int(rekap_kasir["STD_Personil"].sum()),
         "Sales Member": "Rp " + format(rekap_kasir["Sales_Member"].sum(), ",.0f"),
