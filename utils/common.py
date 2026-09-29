@@ -166,7 +166,7 @@ def format_struk(raw_text, width=STRUK_WIDTH):
             skip_next_empty = False
             continue
         skip_next_empty = False
-        if re.fullmatch(r"=+", line.strip()) and i < 5:
+        if re.fullmatch(r"=+", line.strip()):
             final.append(line)
             skip_next_empty = True
             continue
@@ -218,11 +218,12 @@ def generate_pdf(text):
     from fpdf import FPDF
     pdf = FPDF(unit="mm", format=(80, 297))
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=5)
-    pdf.set_font("Courier", size=9)
+    pdf.set_auto_page_break(auto=True, margin=3)
+    pdf.set_margins(left=3, top=3, right=3)
+    pdf.set_font("Courier", size=8)
     for line in text.split("\n"):
         safe_line = line.encode("latin-1", "replace").decode("latin-1")
-        pdf.cell(0, 3.6, safe_line, ln=1)
+        pdf.cell(0, 3.0, safe_line, ln=1)
     return bytes(pdf.output())
 
 
