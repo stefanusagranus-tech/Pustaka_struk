@@ -564,26 +564,37 @@ else:
 
 
 # ============================================================
-# NAVIGASI CUSTOM (ganti sidebar)
+# NAVIGASI CUSTOM (GANTI SIDEBAR)
 # ============================================================
 st.markdown("---")
 st.markdown("### 📌 Halaman Lain")
+st.caption("Tap tombol di bawah buat pindah halaman")
 
+# Baris 1: halaman utama
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("📊 1 PSM per PLU", use_container_width=True):
+    if st.button("📊 1 PSM per PLU", use_container_width=True, key="nav_psm"):
         st.switch_page("pages/1_PSM_per_PLU.py")
-    if st.button("🎁 2 SG per Paket", use_container_width=True):
-        st.switch_page("pages/2_SG_per_Paket.py")
-    if st.button("📦 3 Topup Flaz", use_container_width=True):
-        st.switch_page("pages/5_Topup_Flaz.py")
 
 with col2:
-    if st.button("🧾 4 Cek Struk", use_container_width=True):
+    if st.button("🎁 2 SG per Paket", use_container_width=True, key="nav_sg"):
+        st.switch_page("pages/2_SG_per_Paket.py")
+
+# Baris 2
+col3, col4 = st.columns(2)
+
+with col3:
+    if st.button("📦 3 Topup Flaz", use_container_width=True, key="nav_topup"):
+        st.switch_page("pages/5_Topup_Flaz.py")
+
+with col4:
+    if st.button("🧾 4 Cek Struk", use_container_width=True, key="nav_struk"):
         st.switch_page("pages/3_struk_Suger.py")
-    if st.button("❌ 5 Void Transaksi", use_container_width=True):
-        st.switch_page("pages/6_Cek_Struk_Void.py")
+
+# Baris 3: full width
+if st.button("❌ 5 Void Transaksi", use_container_width=True, key="nav_void"):
+    st.switch_page("pages/6_Cek_Struk_Void.py")
 
 
 # ============================================================
