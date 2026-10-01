@@ -12,11 +12,10 @@ from utils.common import (
 )
 from utils.plu_dict import get_nama_plu
 
-st.set_page_config(
-    page_title="Laporan Suger",
-    page_icon="🎁",
-    layout="wide",
-)
+from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
+
+setup_anonim_page("Cek Struk", "🧾")
+apply_nav_style()
 
 st.title("🎁 Laporan Suger per Item")
 st.markdown("Menampilkan item Suger beserta qty, sales, dan nomor bon.")
@@ -352,3 +351,5 @@ try:
 except Exception as e:
     st.error("Error: " + str(e))
     st.exception(e)
+
+render_nav_universal("struk")
