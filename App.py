@@ -784,8 +784,10 @@ elif st.session_state.current_page == "manage_plu":
         st.markdown("### 📤 Upload File PLU")
 
         st.info(
-            "Format CSV harus punya kolom **PLU**. "
-            "Kolom lain (Desc, Mekanisme, Brand, Kat) optional."
+          "Format file yang didukung: **CSV, Excel (.xlsx/.xls), PDF**. "
+          "Wajib ada kolom **PLU**. Kolom lain (Desc, Mekanisme, Brand, Kat) optional.\n\n"
+          "**Tips PDF:** Kalau PDF dari Google Sheets/Excel biasanya bisa dibaca. "
+          "Kalau PDF hasil scan/foto, akurasi rendah."
         )
 
         with st.form("form_upload_plu"):
@@ -797,9 +799,10 @@ elif st.session_state.current_page == "manage_plu":
             )
 
             uploaded = st.file_uploader(
-                "Pilih file CSV",
-                type=["csv"],
-                key="plu_csv_upload",
+               "Pilih file (CSV / Excel / PDF)",
+               type=["csv", "xlsx", "xls", "pdf"],
+               key="plu_csv_upload",
+               help="Support CSV, Excel, dan PDF. Kalau PDF, pastikan tabel bisa di-extract.",
             )
 
             col1, col2, col3 = st.columns(3)
