@@ -90,11 +90,9 @@ NAV_BUTTON_STYLE = """
 """
 
 
-# ============================================================
-# DAFTAR SEMUA HALAMAN
-# ============================================================
 SEMUA_HALAMAN = [
     {"id": "home",      "label": "🏠 Home",             "path": "pages/0_Home.py"},
+    {"id": "idea",      "label": "💡 Idea Box",         "path": "pages/0b_Idea_Box.py"},   # ← TAMBAH INI
     {"id": "dashboard", "label": "📊 Dashboard",         "path": "App.py"},
     {"id": "psm",       "label": "📊 1 PSM per PLU",     "path": "pages/1_PSM_per_PLU.py"},
     {"id": "sg",        "label": "🎁 2 SG per Paket",    "path": "pages/2_SG_per_Paket.py"},
