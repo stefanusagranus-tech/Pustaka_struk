@@ -2,10 +2,10 @@
 utils/plu_loader.py
 Helper untuk load & manage file PLU per kategori & periode.
 Support: CSV, Excel (.xlsx/.xls), PDF.
+Fitur: Auto-detect delimiter, deteksi kolom fleksibel, parse mekanisme.
 """
 import os
 import re
-import io
 import pandas as pd
 from datetime import date, datetime
 from pathlib import Path
@@ -23,24 +23,120 @@ KATEGORI = {
     "suger": {"nama": "Suger", "icon": "🍬", "desc": "PLU kategori suger"},
 }
 
-# Format yang didukung
 SUPPORTED_EXTENSIONS = ["csv", "xlsx", "xls", "pdf"]
 
 
 def get_kategori_dir(kategori):
+    """Path folder untuk kategori tertentu."""
     return os.path.join(DATA_DIR, kategori)
+
+
+# ============================================================
+# HELPER: DETEKSI KOLOM (FLEKSIBEL)
+# ============================================================
+def find_column(df, keywords):
+    """
+    Cari kolom di DataFrame yang namanya mengandung salah satu keyword.
+    Return nama kolom pertama yang match, atau None.
+
+    Args:
+        df: DataFrame
+        keywords: list of str — keyword untuk dicari (lowercase)
+    """
+    for col in df.columns:
+        col_lower = str(col).strip().lower().replace("_", " ").replace(".", " ")
+        for kw in keywords:
+            if kw in col_lower:
+                return col
+    return None
+
+
+# ============================================================
+# PARSE MEKANISME
+# ============================================================
+def parse_mekanisme(text):
+    """
+    Parse teks mekanisme jadi struktur data.
+
+    Contoh input:
+        "BELI 2 GRATIS 1"
+        "BELI 3 GRATIS 1"
+        "BELI 1 GRATIS ELLIPS"
+        "Beli 2 Gratis 1 (Min Rp 50.000)"
+
+    Return dict:
+        {
+            "beli_qty": 2,
+            "gratis_qty": 1,
+            "gratis_item": "",
+            "raw": "BELI 2 GRATIS 1",
+        }
+    """
+    if not text or pd.isna(text):
+        return {
+            "beli_qty": None,
+            "gratis_qty": None,
+            "gratis_item": "",
+            "raw": "",
+        }
+
+    text_str = str(text).strip()
+    text_lower = text_str.lower()
+
+    # Pattern 1: "beli X gratis Y" (angka)
+    pattern = r"beli\s+(\d+)\s+gratis\s+(\d+)"
+    match = re.search(pattern, text_lower)
+
+    if match:
+        return {
+            "beli_qty": int(match.group(1)),
+            "gratis_qty": int(match.group(2)),
+            "gratis_item": "",
+            "raw": text_str,
+        }
+
+    # Pattern 2: "beli X gratis <NAMA ITEM>"
+    pattern_item = r"beli\s+(\d+)\s+gratis\s+([a-zA-Z\s]+?)(?:\s*\(|$)"
+    match_item = re.search(pattern_item, text_lower)
+
+    if match_item:
+        return {
+            "beli_qty": int(match_item.group(1)),
+            "gratis_qty": 1,
+            "gratis_item": match_item.group(2).strip().upper(),
+            "raw": text_str,
+        }
+
+    # Fallback: ambil angka pertama sebagai beli_qty
+    match_num = re.search(r"\d+", text_lower)
+    if match_num:
+        return {
+            "beli_qty": int(match_num.group()),
+            "gratis_qty": 1,
+            "gratis_item": "",
+            "raw": text_str,
+        }
+
+    return {
+        "beli_qty": None,
+        "gratis_qty": None,
+        "gratis_item": "",
+        "raw": text_str,
+    }
 
 
 # ============================================================
 # HELPER: BACA CSV
 # ============================================================
 def _safe_read_csv(filepath_or_buffer):
-    """Baca CSV dengan berbagai fallback."""
+    """Baca CSV dengan berbagai fallback + auto-detect delimiter."""
     for kwargs in [
+        {"sep": None, "engine": "python", "on_bad_lines": "skip"},
         {},
         {"on_bad_lines": "skip"},
         {"engine": "python", "on_bad_lines": "skip"},
-        {"sep": None, "engine": "python", "on_bad_lines": "skip"},
+        {"sep": "\t", "engine": "python", "on_bad_lines": "skip"},
+        {"sep": ";", "engine": "python", "on_bad_lines": "skip"},
     ]:
         try:
             if hasattr(filepath_or_buffer, "seek"):
@@ -68,90 +164,82 @@ def _safe_read_excel(filepath_or_buffer):
 # HELPER: BACA PDF
 # ============================================================
 def _read_pdf_tables(filepath_or_buffer):
-    """
-    Baca tabel dari PDF pakai pdfplumber.
-    Return list of DataFrame (1 per halaman).
-    """
+    """Baca tabel dari PDF. Support format tabel & format teks bebas."""
     try:
         import pdfplumber
     except ImportError:
-        raise Exception("Library pdfplumber belum terinstall. "
-                        "Tambah 'pdfplumber' di requirements.txt")
+        raise Exception(
+            "Library pdfplumber belum terinstall. "
+            "Tambah 'pdfplumber' di requirements.txt"
+        )
 
     dfs = []
 
     try:
         with pdfplumber.open(filepath_or_buffer) as pdf:
-            for page_num, page in enumerate(pdf.pages, 1):
-                # Coba extract tables
+            for page in pdf.pages:
+                # === CARA 1: Tabel rapi ===
                 tables = page.extract_tables()
 
-                if not tables:
-                    # Fallback: extract text jadi 1 kolom
-                    text = page.extract_text()
-                    if text:
-                        lines = text.split("\n")
-                        dfs.append(pd.DataFrame({"text": lines}))
+                if tables:
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+                        header = [
+                            str(h).strip() if h else f"col_{i}"
+                            for i, h in enumerate(table[0])
+                        ]
+                        df = pd.DataFrame(table[1:], columns=header)
+                        dfs.append(df)
                     continue
 
-                for table in tables:
-                    if not table or len(table) < 2:
-                        continue
+                # === CARA 2: Text bebas pakai regex ===
+                text = page.extract_text()
+                if not text:
+                    continue
 
-                    # Baris pertama = header
-                    header = table[0]
-                    rows = table[1:]
+                pattern = r"(\d{5,6})\s+(.+?)(?=\s+\d{5,6}\s+|$)"
+                matches = re.findall(pattern, text, re.DOTALL)
 
-                    # Bersihkan header
-                    header = [
-                        str(h).strip() if h else f"col_{i}"
-                        for i, h in enumerate(header)
-                    ]
+                if matches:
+                    rows = []
+                    for plu, desc in matches:
+                        desc_clean = " ".join(desc.split())
+                        rows.append({
+                            "PLU": int(plu),
+                            "Descp": desc_clean,
+                        })
+                    if rows:
+                        dfs.append(pd.DataFrame(rows))
 
-                    df = pd.DataFrame(rows, columns=header)
-                    dfs.append(df)
     except Exception as e:
         raise Exception(f"Gagal baca PDF: {e}")
 
     return dfs
 
 
-def _pdf_to_dataframe(filepath_or_buffer, target_plu=True):
-    """
-    Baca PDF → gabungkan semua tabel → cari kolom PLU.
-    Return DataFrame.
-    """
+def _pdf_to_dataframe(filepath_or_buffer):
+    """Baca PDF → gabungkan semua tabel → cari kolom PLU."""
     dfs = _read_pdf_tables(filepath_or_buffer)
 
     if not dfs:
         raise Exception("PDF tidak punya tabel yang bisa dibaca.")
 
-    # Cari DataFrame yang punya kolom PLU
     for df in dfs:
-        # Cek kolom header
         for col in df.columns:
-            col_lower = str(col).strip().lower()
-            if "plu" in col_lower:
+            if "plu" in str(col).strip().lower():
                 return df
 
-    # Kalau gak ada kolom PLU di header, coba pakai tabel pertama
-    # dan cari kolom yang isinya angka semua (kandidat PLU)
-    main_df = dfs[0]
-
-    return main_df
+    return dfs[0]
 
 
 # ============================================================
 # HELPER: DETEKSI FORMAT
 # ============================================================
 def _detect_and_read(filepath_or_buffer, filename=""):
-    """
-    Auto-detect format dari nama file / isi.
-    Return DataFrame.
-    """
+    """Auto-detect format dari nama file / isi."""
     filename_lower = str(filename).lower()
 
-    # Deteksi dari ekstensi
     if filename_lower.endswith(".csv"):
         return _safe_read_csv(filepath_or_buffer), "csv"
 
@@ -161,7 +249,7 @@ def _detect_and_read(filepath_or_buffer, filename=""):
     if filename_lower.endswith(".pdf"):
         return _pdf_to_dataframe(filepath_or_buffer), "pdf"
 
-    # Fallback: coba CSV dulu, baru Excel
+    # Fallback
     try:
         return _safe_read_csv(filepath_or_buffer), "csv"
     except Exception:
@@ -172,15 +260,15 @@ def _detect_and_read(filepath_or_buffer, filename=""):
     except Exception:
         pass
 
-    raise Exception(
-        "Format file tidak dikenali. Gunakan CSV, Excel, atau PDF."
-    )
+    raise Exception("Format file tidak dikenali. Gunakan CSV, Excel, atau PDF.")
 
+# ⬇️⬇️⬇️ LANJUT KE BAGIAN 2 ⬇️⬇️⬇️
 
 # ============================================================
 # PARSE NAMA FILE
 # ============================================================
 def parse_filename(filename):
+    """Parse nama file: '2026-10-01_07.csv' → dict info."""
     name = re.sub(r"\.(csv|xlsx|xls|pdf)$", "", filename, flags=re.IGNORECASE)
     match = re.match(r"(\d{4})-(\d{2})-(\d{2})_(\d{2})", name)
     if not match:
@@ -205,6 +293,7 @@ def parse_filename(filename):
 # LIST FILE
 # ============================================================
 def list_plu_files(kategori):
+    """List semua file CSV/Excel/PDF PLU di folder kategori tertentu."""
     folder = get_kategori_dir(kategori)
     if not os.path.exists(folder):
         return []
@@ -225,6 +314,7 @@ def list_plu_files(kategori):
 
 
 def list_all_files():
+    """List semua file di semua kategori."""
     result = {}
     for kat in KATEGORI.keys():
         result[kat] = list_plu_files(kat)
@@ -235,6 +325,7 @@ def list_all_files():
 # FIND FILE BY DATE
 # ============================================================
 def find_file_by_date(kategori, tgl):
+    """Cari file PLU untuk kategori & tanggal tertentu."""
     files = list_plu_files(kategori)
     for f in files:
         if (f["tahun"] == tgl.year
@@ -245,33 +336,36 @@ def find_file_by_date(kategori, tgl):
 
 
 # ============================================================
-# LOAD PLU
+# LOAD PLU — EKSTRAKSI FLEKSIBEL
 # ============================================================
 def _extract_plu_from_df(df):
-    """Ekstrak PLU dari DataFrame. Return list of dict."""
+    """
+    Ekstrak PLU + info dari DataFrame.
+    Deteksi kolom pakai keyword — fleksibel.
+    """
     if df.empty:
         return []
 
-    # Cari kolom PLU (case-insensitive, partial match)
-    plu_col = None
-    for col in df.columns:
-        col_lower = str(col).strip().lower()
-        if col_lower == "plu":
-            plu_col = col
-            break
-
-    # Kalau gak ada exact "plu", coba kolom yang mengandung "plu"
-    if plu_col is None:
-        for col in df.columns:
-            if "plu" in str(col).strip().lower():
-                plu_col = col
-                break
-
+    # === DETEKSI KOLOM PLU ===
+    plu_col = find_column(df, ["plu"])
     if plu_col is None:
         return []
 
+    # === DETEKSI KOLOM LAIN (fleksibel) ===
+    nama_col = find_column(df, [
+        "descp", "desc", "description", "nama", "barang", "produk", "item"
+    ])
+    mekanisme_col = find_column(df, [
+        "mekanisme", "mekanisme promo", "promo mekanisme"
+    ])
+    brand_col = find_column(df, ["brand", "merek", "merk"])
+    kat_col = find_column(df, ["kat", "kategori"])
+    qty_col = find_column(df, ["syarat qty", "qty", "quantity"])
+    beli_col = find_column(df, ["beli qty", "beli"])
+
     result = []
     for _, row in df.iterrows():
+        # Skip baris kosong
         try:
             plu_val = int(float(row[plu_col]))
         except (ValueError, TypeError):
@@ -279,26 +373,58 @@ def _extract_plu_from_df(df):
 
         info = {"plu": plu_val}
 
-        for col in df.columns:
-            col_lower = str(col).strip().lower()
-            if col_lower in ["desc", "description", "nama"]:
-                info["nama"] = str(row[col]) if pd.notna(row[col]) else ""
-            elif col_lower == "mekanisme":
-                info["mekanisme"] = str(row[col]) if pd.notna(row[col]) else ""
-            elif col_lower in ["brand", "merek"]:
-                info["brand"] = str(row[col]) if pd.notna(row[col]) else ""
-            elif col_lower == "kat":
-                info["kat"] = str(row[col]) if pd.notna(row[col]) else ""
-            elif col_lower in ["qty", "quantity", "syarat_qty"]:
-                try:
-                    info["qty"] = int(float(row[col]))
-                except (ValueError, TypeError):
-                    info["qty"] = None
-            elif col_lower in ["beli_qty", "beli"]:
-                try:
-                    info["beli_qty"] = int(float(row[col]))
-                except (ValueError, TypeError):
-                    info["beli_qty"] = None
+        # Ambil deskripsi
+        if nama_col and pd.notna(row[nama_col]):
+            info["nama"] = str(row[nama_col]).strip()
+        else:
+            info["nama"] = ""
+
+        # Ambil mekanisme + parse
+        if mekanisme_col and pd.notna(row[mekanisme_col]):
+            mek_text = str(row[mekanisme_col]).strip()
+            info["mekanisme"] = mek_text
+
+            parsed = parse_mekanisme(mek_text)
+            info["beli_qty"] = parsed["beli_qty"]
+            info["gratis_qty"] = parsed["gratis_qty"]
+            info["gratis_item"] = parsed["gratis_item"]
+        else:
+            info["mekanisme"] = ""
+            info["beli_qty"] = None
+            info["gratis_qty"] = None
+            info["gratis_item"] = ""
+
+        # Ambil brand
+        if brand_col and pd.notna(row[brand_col]):
+            info["brand"] = str(row[brand_col]).strip()
+        else:
+            info["brand"] = ""
+
+        # Ambil kategori
+        if kat_col and pd.notna(row[kat_col]):
+            info["kat"] = str(row[kat_col]).strip()
+        else:
+            info["kat"] = ""
+
+        # Ambil qty (kalau ada kolom qty eksplisit)
+        if qty_col and pd.notna(row[qty_col]):
+            try:
+                info["qty"] = int(float(row[qty_col]))
+            except (ValueError, TypeError):
+                info["qty"] = None
+        else:
+            # Fallback: pakai syarat dari mekanisme (beli + gratis)
+            if info.get("beli_qty") and info.get("gratis_qty"):
+                info["qty"] = info["beli_qty"] + info["gratis_qty"]
+            else:
+                info["qty"] = None
+
+        # Ambil beli_qty (kalau ada kolom eksplisit)
+        if beli_col and pd.notna(row[beli_col]):
+            try:
+                info["beli_qty"] = int(float(row[beli_col]))
+            except (ValueError, TypeError):
+                pass
 
         result.append(info)
 
@@ -321,6 +447,7 @@ def load_plu_from_file(filepath):
 
 
 def load_plu_by_date(kategori, tgl):
+    """Load PLU untuk kategori & tanggal tertentu."""
     file_info = find_file_by_date(kategori, tgl)
     if file_info is None:
         return [], None
@@ -333,14 +460,12 @@ def load_plu_by_date(kategori, tgl):
 # ============================================================
 def save_plu_csv(uploaded_file, kategori, tahun, bulan, tgl_awal, tgl_akhir):
     """
-    Simpan file PLU yang diupload.
-    Support: CSV, Excel, PDF.
-    File akan disimpan dalam format CSV agar ringan.
+    Simpan file PLU yang diupload (CSV/Excel/PDF) sebagai CSV.
     """
     folder = get_kategori_dir(kategori)
     os.makedirs(folder, exist_ok=True)
 
-    # Baca file apapun formatnya
+    # Baca file
     try:
         df, fmt = _detect_and_read(uploaded_file, filename=uploaded_file.name)
     except Exception as e:
@@ -350,17 +475,7 @@ def save_plu_csv(uploaded_file, kategori, tahun, bulan, tgl_awal, tgl_akhir):
         return False, "File kosong atau tidak ada data.", None
 
     # Cek kolom PLU
-    plu_col = None
-    for col in df.columns:
-        if str(col).strip().lower() == "plu":
-            plu_col = col
-            break
-
-    if plu_col is None:
-        for col in df.columns:
-            if "plu" in str(col).strip().lower():
-                plu_col = col
-                break
+    plu_col = find_column(df, ["plu"])
 
     if plu_col is None:
         return False, (
@@ -385,6 +500,7 @@ def save_plu_csv(uploaded_file, kategori, tahun, bulan, tgl_awal, tgl_akhir):
 
 
 def delete_plu_file(kategori, filename):
+    """Hapus file PLU."""
     filepath = os.path.join(get_kategori_dir(kategori), filename)
     if os.path.exists(filepath):
         os.remove(filepath)
@@ -396,6 +512,7 @@ def delete_plu_file(kategori, filename):
 # STATISTIK
 # ============================================================
 def get_stats():
+    """Statistik file per kategori."""
     stats = {}
     for kat, info in KATEGORI.items():
         files = list_plu_files(kat)
