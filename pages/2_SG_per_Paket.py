@@ -12,10 +12,10 @@ from utils.common import (
 )
 from utils.plu_dict import get_nama_plu, get_plu_normalized
 
-st.set_page_config(
-    page_title="SG per Paket",
-    page_icon="🎁",
-    layout="wide",
+from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
+
+setup_anonim_page("2 SG per Paket", "🎁")
+apply_nav_style()
 )
 
 st.title("🎁 Laporan Serba Gratis (SG) per Paket")
@@ -472,3 +472,5 @@ try:
 except Exception as e:
     st.error("Error: " + str(e))
     st.exception(e)
+    
+render_nav_universal("sg")
