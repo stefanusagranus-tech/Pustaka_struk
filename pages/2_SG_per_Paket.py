@@ -1,5 +1,6 @@
 """
-2_SG_per_Paket.py — Laporan Serba Gratis per Paket (baca dari CSV).
+2_SG_per_Paket.py — Laporan Serba Gratis per Paket.
+Baca mekanisme dari CSV (fleksibel).
 """
 import sys
 import os
@@ -21,8 +22,8 @@ from utils.plu_loader import load_plu_by_date, list_plu_files
 setup_anonim_page("2 SG per Paket", "🎁")
 apply_nav_style()
 
-st.title("🎁 Laporan Serba Gratis (SG) per Paket")
-st.markdown("Menampilkan paket Serba Gratis berdasarkan periode (dari CSV).")
+st.title("🎁 Laporan Serba Gratis (SG)")
+st.markdown("Menampilkan paket SG berdasarkan periode & mekanisme (dari CSV).")
 
 # ============================================================
 # CEK DATABASE
@@ -77,6 +78,7 @@ plu_list, file_info = load_plu_by_date("sg", tgl_pilih)
 
 if file_info is None:
     st.warning(f"⚠️ Tidak ada file PLU SG untuk tanggal **{tgl_pilih}**.")
+
     files = list_plu_files("sg")
     if files:
         with st.expander("📂 File PLU SG yang tersedia"):
@@ -84,6 +86,7 @@ if file_info is None:
                 st.write(f"- **{f['periode_label']}** → `{f['filename']}`")
     else:
         st.info("💡 Upload file di halaman **Manage PLU** → kategori **SG**.")
+
     safe_stop("sg")
 
 st.success(f"✅ Periode: **{file_info['periode_label']}** — {len(plu_list)} PLU")
@@ -92,19 +95,12 @@ if not plu_list:
     st.warning("File PLU SG kosong.")
     safe_stop("sg")
 
-# Bangun mapping PLU -> grup (dari kolom 'nama' atau 'mekanisme')
-PLU_TO_GROUP = {}
-for item in plu_list:
-    plu = item["plu"]
-    grup = item.get("nama", "") or item.get("mekanisme", "") or "SG"
-    if grup not in PLU_TO_GROUP:
-        PLU_TO_GROUP[grup] = []
-    PLU_TO_GROUP[grup].append(plu)
-
-ALL_PLU_SG = set([item["plu"] for item in plu_list])
+# Mapping PLU → info
+PLU_INFO = {item["plu"]: item for item in plu_list}
+ALL_PLU_SG = set(PLU_INFO.keys())
 
 # ============================================================
-# FILTER & HITUNG
+# FILTER DATA
 # ============================================================
 st.markdown("---")
 
@@ -132,19 +128,31 @@ for c in ["qty", "price"]:
 df_sg_all["bill_str"] = df_sg_all["bill_no"].astype(str).str.strip()
 
 # ============================================================
-# HITUNG PAKET (per struk per grup)
+# HITUNG PAKET (fleksibel per mekanisme)
 # ============================================================
 paket_rows = []
 
 for (bill, plu), grp in df_sg_all.groupby(["bill_str", "plu_norm_int"]):
-    # Cari info grup
-    grup_info = next((item for item in plu_list if item["plu"] == int(plu)), None)
-    if not grup_info:
+    plu_int = int(plu)
+    info = PLU_INFO.get(plu_int)
+
+    if not info:
         continue
 
-    nama_grup = grup_info.get("nama", "") or "SG"
-    syarat_qty = grup_info.get("qty") or 3
-    beli_qty = grup_info.get("beli_qty") or (syarat_qty - 1)
+    nama = info.get("nama", "") or get_nama_plu(plu_int)
+    mekanisme = info.get("mekanisme", "") or ""
+    beli_qty = info.get("beli_qty")
+    gratis_qty = info.get("gratis_qty")
+    gratis_item = info.get("gratis_item", "")
+
+    # Kalau beli_qty gak ada, skip
+    if not beli_qty or beli_qty <= 0:
+        continue
+
+    # Total syarat = beli + gratis
+    syarat_qty = beli_qty + (gratis_qty or 0)
+    if syarat_qty <= 0:
+        continue
 
     total_qty = grp["qty"].sum()
     total_sales = (grp["price"] * grp["qty"]).sum()
@@ -153,16 +161,28 @@ for (bill, plu), grp in df_sg_all.groupby(["bill_str", "plu_norm_int"]):
     if jumlah_paket == 0:
         continue
 
+    # Rasio yang dibayar = beli / syarat
     rasio_bayar = beli_qty / syarat_qty
     sales_bayar_per_paket = (total_sales / jumlah_paket) * rasio_bayar
     qty_per_paket = int(total_qty // jumlah_paket)
 
+    # Info gratis
+    if gratis_item:
+        info_gratis = f"+ Gratis {gratis_item}"
+    elif gratis_qty:
+        info_gratis = f"+ Gratis {gratis_qty}"
+    else:
+        info_gratis = ""
+
     for p in range(1, jumlah_paket + 1):
         paket_rows.append({
             "Faktur": bill,
-            "Grup": nama_grup,
-            "PLU": int(plu),
-            "Nama_Item": get_nama_plu(int(plu)),
+            "PLU": plu_int,
+            "Nama_Item": nama,
+            "Mekanisme": mekanisme,
+            "Beli": beli_qty,
+            "Gratis": gratis_qty or 0,
+            "Info_Gratis": info_gratis,
             "Jumlah_Paket": jumlah_paket,
             "Paket_Ke": p,
             "Qty_Paket": qty_per_paket,
@@ -188,20 +208,84 @@ c3.metric("Total Qty", format(int(df_paket["Qty_Paket"].sum()), ","))
 c4.metric("Total Sales", "Rp " + format(df_paket["Sales_Paket"].sum(), ",.0f"))
 
 # ============================================================
-# TABEL
+# RINGKASAN PER MEKANISME
+# ============================================================
+st.markdown("---")
+st.markdown("### 📊 Ringkasan per Mekanisme")
+
+if "Mekanisme" in df_paket.columns and not df_paket["Mekanisme"].eq("").all():
+    mek_group = (
+        df_paket.groupby("Mekanisme")
+        .agg(
+            Jumlah_Paket=("Paket_Ke", "count"),
+            Total_Sales=("Sales_Paket", "sum"),
+            Jumlah_Struk=("Faktur", "nunique"),
+        )
+        .reset_index()
+        .sort_values("Jumlah_Paket", ascending=False)
+    )
+
+    mek_display = mek_group.copy()
+    mek_display["Total_Sales"] = mek_display["Total_Sales"].apply(
+        lambda x: "Rp " + format(x, ",.0f")
+    )
+
+    st.dataframe(mek_display, use_container_width=True, hide_index=True)
+
+# ============================================================
+# TABEL DETAIL
 # ============================================================
 st.markdown("---")
 st.markdown("### 📋 Tabel Paket SG")
 
-df_display = df_paket[["Faktur", "Grup", "PLU", "Paket_Ke", "Qty_Paket", "Sales_Paket"]].copy()
+df_display = df_paket[[
+    "Faktur", "PLU", "Nama_Item", "Mekanisme",
+    "Paket_Ke", "Qty_Paket", "Sales_Paket"
+]].copy()
 df_display["Sales_Paket"] = df_display["Sales_Paket"].apply(
     lambda x: "Rp " + format(x, ",.0f")
 )
 st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-# Download
+# ============================================================
+# DETAIL PER MEKANISME (expandable)
+# ============================================================
+st.markdown("---")
+st.markdown("### 📂 Detail per Mekanisme")
+
+for mek, grp in df_paket.groupby("Mekanisme"):
+    jml_paket = len(grp)
+    total_sales = grp["Sales_Paket"].sum()
+    jml_struk = grp["Faktur"].nunique()
+
+    judul = f"{mek} — {jml_paket} paket | Rp {format(total_sales, ',.0f')} | {jml_struk} struk"
+
+    with st.expander(judul):
+        # Breakdown per PLU
+        plu_group = (
+            grp.groupby(["PLU", "Nama_Item"])
+            .agg(
+                Jumlah_Paket=("Paket_Ke", "count"),
+                Total_Sales=("Sales_Paket", "sum"),
+            )
+            .reset_index()
+            .sort_values("Jumlah_Paket", ascending=False)
+        )
+
+        plu_display = plu_group.copy()
+        plu_display["Total_Sales"] = plu_display["Total_Sales"].apply(
+            lambda x: "Rp " + format(x, ",.0f")
+        )
+
+        st.dataframe(plu_display, use_container_width=True, hide_index=True)
+
+# ============================================================
+# DOWNLOAD
+# ============================================================
+st.markdown("---")
+
 st.download_button(
-    "📥 Download Tabel SG per Paket (CSV)",
+    "📥 Download Tabel SG (CSV)",
     data=df_paket.to_csv(index=False).encode("utf-8"),
     file_name=f"sg_{tgl_pilih}.csv",
     mime="text/csv",
