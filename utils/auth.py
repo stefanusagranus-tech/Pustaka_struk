@@ -1,58 +1,5 @@
-"""
-utils/auth.py
-Helper untuk login screen dengan Streamlit Secrets.
-"""
-import streamlit as st
-import time
-
-
-# ============================================================
-# KONFIGURASI
-# ============================================================
-MAX_ATTEMPTS = 3
-LOCK_DURATION = 60  # detik
-
-
-# ============================================================
-# AMBIL PASSWORD DARI SECRETS
-# ============================================================
-def get_password():
-    """
-    Ambil password dari Streamlit Secrets.
-    Fallback ke environment variable kalau gak ada secrets.
-    """
-    try:
-        # Cara 1: Coba ambil dari st.secrets
-        if "password" in st.secrets:
-            return st.secrets["password"]
-    except Exception:
-        pass
-
-    # Cara 2: Fallback ke environment variable (buat dev lokal)
-    import os
-    return os.environ.get("APP_PASSWORD", "changeme")
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-def init_auth_state():
-    """Inisialisasi session state untuk auth."""
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = False
-    if "login_attempts" not in st.session_state:
-        st.session_state.login_attempts = 0
-    if "lock_until" not in st.session_state:
-        st.session_state.lock_until = 0
-    if "current_page" not in st.session_state:
-        st.session_state.current_page = None
-
-
-# ============================================================
-# LOGIN SCREEN
-# ============================================================
 def render_login_screen():
-    """Tampilkan login screen."""
+    """Tampilkan login screen bergaya Yorushika."""
 
     init_auth_state()
 
@@ -70,9 +17,9 @@ def render_login_screen():
     with col2:
         st.markdown("""
         <div style="text-align: center; padding: 40px 0 20px 0;">
-            <h1 style="font-size: 3rem; margin: 0;">🎶</h1>
-            <h2 style="margin: 10px 0 5px 0;">Album Lagu</h2>
-            <p style="color: #888; margin: 0;">AKU YORUSHIKA. KAMU YORUSHIKA?</p>
+            <h1 style="font-size: 3rem; margin: 0;">🎵</h1>
+            <h2 style="margin: 10px 0 5px 0;">ALBUM YORUSHIKA</h2>
+            <p style="color: #888; margin: 0; font-style: italic;">Aku Yorushika, Kamu Yorushika?</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -80,9 +27,9 @@ def render_login_screen():
 
         with st.form("login_form"):
             password_input = st.text_input(
-                "🔑 Password",
+                "🎼 Judul Lagu yang kamu cari",
                 type="password",
-                placeholder="Masukkan password...",
+                placeholder="Ketik judul lagu...",
             )
             submit = st.form_submit_button(
                 "🚀 Masuk",
@@ -96,7 +43,6 @@ def render_login_screen():
             if not correct_password or correct_password == "changeme":
                 st.error("⚠️ Password belum diset. Hubungi admin.")
             elif password_input == correct_password:
-                # Login sukses
                 st.session_state.logged_in = True
                 st.session_state.login_attempts = 0
                 st.session_state.lock_until = 0
@@ -105,31 +51,37 @@ def render_login_screen():
                 st.rerun()
                 return True
             else:
-                # Login gagal
                 st.session_state.login_attempts += 1
                 sisa = MAX_ATTEMPTS - st.session_state.login_attempts
 
                 if sisa <= 0:
-                    st.session_state.lock_until = time.time() + LOCK_DURATION
-                    st.error(f"🔒 Terlalu banyak salah. Terkunci {LOCK_DURATION} detik.")
+                    # 3x salah → close web
+                    st.error("❌ Maaf Lagu tidak ditemukan. Web akan ditutup...")
+                    time.sleep(2)
+                    st.markdown("""
+                    <script>
+                    window.close();
+                    setTimeout(function() {
+                        window.location.href = "about:blank";
+                    }, 500);
+                    </script>
+                    """, unsafe_allow_html=True)
+                    st.stop()
                 else:
-                    st.error(f"❌ Password salah. Sisa percobaan: {sisa}")
+                    st.error(f"❌ Maaf Lagu tidak ditemukan. Sisa percobaan: {sisa}")
 
         st.markdown("---")
-        st.caption("💡 Lupa password? Hubungi admin.")
+        st.caption("💡 Hint: Coba pikirkan lagu favoritmu.")
 
     return False
 
 
-# ============================================================
-# MENU SCREEN
-# ============================================================
 def render_menu_screen():
     """Tampilkan menu pilih Dashboard / Idea Box."""
 
     st.markdown("""
     <div style="text-align: center; padding: 20px 0;">
-        <h1>Selamat datang! 👋</h1>
+        <h1>🎵 Selamat datang! 👋</h1>
         <p style="color: #888; font-size: 1.1rem;">Mau masuk ke mana?</p>
     </div>
     """, unsafe_allow_html=True)
@@ -144,7 +96,7 @@ def render_menu_screen():
             <div style="text-align: center; padding: 20px 0;">
                 <div style="font-size: 4rem;">📊</div>
                 <h2>Dashboard</h2>
-                <p style="color: #888;">Analisis transaksi POS</p>
+                <p style="color: #888;">Analisis transaksi</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -153,7 +105,7 @@ def render_menu_screen():
             - 💰 Ringkasan omzet
             - 👤 Rekap per kasir
             - 🕐 Grafik jam ramai
-            - 💳 Breakdown pembayaran
+            - 📊 Halaman analisis
             """)
 
             if st.button("📊 MASUK DASHBOARD →", use_container_width=True, type="primary", key="btn_dash"):
@@ -166,7 +118,7 @@ def render_menu_screen():
             <div style="text-align: center; padding: 20px 0;">
                 <div style="font-size: 4rem;">💡</div>
                 <h2>Idea Box</h2>
-                <p style="color: #888;">Tulis & kelola ide proyek</p>
+                <p style="color: #888;">Tulis & kelola ide</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -188,27 +140,3 @@ def render_menu_screen():
     with col_l2:
         if st.button("🚪 Logout", use_container_width=True):
             logout()
-            
-# ============================================================
-# LOGOUT
-# ============================================================
-def logout():
-    """Logout user."""
-    st.session_state.logged_in = False
-    st.session_state.login_attempts = 0
-    st.session_state.lock_until = 0
-    st.session_state.current_page = None
-    st.rerun()
-
-
-def back_to_menu():
-    """Kembali ke menu pilih."""
-    st.session_state.current_page = None
-    st.rerun()
-
-def render_back_to_menu_button():
-    """Render tombol kembali ke menu."""
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        if st.button("⬅️ Kembali ke Menu", use_container_width=True):
-            back_to_menu()
