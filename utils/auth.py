@@ -125,7 +125,8 @@ def render_login_screen():
 # MENU SCREEN
 # ============================================================
 def render_menu_screen():
-    """Tampilkan menu pilih Dashboard / Idea Box."""
+def render_menu_screen():
+    """Tampilkan menu pilih Dashboard / Idea Box / Halaman Lain."""
 
     st.markdown("""
     <div style="text-align: center; padding: 20px 0;">
@@ -136,59 +137,70 @@ def render_menu_screen():
 
     st.markdown("---")
 
+    # === MENU UTAMA ===
+    st.markdown("### 📌 Menu Utama")
+
     col1, col2 = st.columns(2)
 
     with col1:
         with st.container(border=True):
-            st.markdown("""
-            <div style="text-align: center; padding: 20px 0;">
-                <div style="font-size: 4rem;">📊</div>
-                <h2>Dashboard</h2>
-                <p style="color: #888;">Analisis transaksi POS</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown("**Fitur:**")
-            st.markdown("""
-            - 💰 Ringkasan omzet
-            - 👤 Rekap per kasir
-            - 🕐 Grafik jam ramai
-            - 💳 Breakdown pembayaran
-            """)
-
-            if st.button("📊 MASUK DASHBOARD →", use_container_width=True, type="primary", key="btn_dash"):
+            st.markdown("#### 📊 Dashboard")
+            st.caption("Analisis transaksi POS")
+            if st.button("Buka Dashboard", use_container_width=True, type="primary", key="btn_dash"):
                 st.session_state.current_page = "dashboard"
                 st.rerun()
 
     with col2:
         with st.container(border=True):
-            st.markdown("""
-            <div style="text-align: center; padding: 20px 0;">
-                <div style="font-size: 4rem;">💡</div>
-                <h2>Idea Box</h2>
-                <p style="color: #888;">Tulis & kelola ide proyek</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown("**Fitur:**")
-            st.markdown("""
-            - ✍️ Tulis ide baru
-            - 🎨 Auto-generate blueprint
-            - 📋 Copy ke AI lain
-            - 🗑️ Arsip ide
-            """)
-
-            if st.button("💡 MASUK IDEA BOX →", use_container_width=True, type="primary", key="btn_idea"):
+            st.markdown("#### 💡 Idea Box")
+            st.caption("Tulis & kelola ide proyek")
+            if st.button("Buka Idea Box", use_container_width=True, type="primary", key="btn_idea"):
                 st.session_state.current_page = "idea_box"
                 st.rerun()
 
     st.markdown("---")
 
+    # === HALAMAN ANALISIS ===
+    st.markdown("### 📂 Halaman Analisis")
+    st.caption("Tap untuk pindah ke halaman analisis")
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        if st.button("📊 1 PSM per PLU", use_container_width=True, key="nav_psm"):
+            st.switch_page("pages/1_PSM_per_PLU.py")
+        if st.button("📦 3 Topup Flaz", use_container_width=True, key="nav_topup"):
+            st.switch_page("pages/5_Topup_Flaz.py")
+
+    with col4:
+        if st.button("🎁 2 SG per Paket", use_container_width=True, key="nav_sg"):
+            st.switch_page("pages/2_SG_per_Paket.py")
+        if st.button("❌ 5 Void Transaksi", use_container_width=True, key="nav_void"):
+            st.switch_page("pages/6_Cek_Struk_Void.py")
+
+    st.markdown("---")
+
+    # === TOOLS ===
+    st.markdown("### 🔧 Tools")
+    st.caption("Alat bantu untuk cek & audit")
+
+    col5, col6 = st.columns(2)
+
+    with col5:
+        if st.button("🧾 Cek Struk", use_container_width=True, key="nav_cek_struk"):
+            st.switch_page("pages/3_struk_Suger.py")
+
+    with col6:
+        if st.button("🔍 Cek Struk Void", use_container_width=True, key="nav_cek_void"):
+            st.switch_page("pages/6_Cek_Struk_Void.py")
+
+    st.markdown("---")
+
+    # === LOGOUT ===
     col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
     with col_l2:
         if st.button("🚪 Logout", use_container_width=True):
             logout()
-
 
 # ============================================================
 # LOGOUT
