@@ -6,12 +6,82 @@ from utils.common import extract_zip_and_find_db
 from utils.common import load_tables
 from utils.common import build_kasir_dict_from_receipt
 
+# ============================================================
+# 🔒 KONFIGURASI ANONIM — WAJIB PALING ATAS
+# ============================================================
 st.set_page_config(
-    page_title="Dashboard POS",
+    page_title="Dashboard POS",   # ganti kalau mau nama lain
     page_icon="📊",
     layout="wide",
+    initial_sidebar_state="collapsed",  # sidebar ketutup default
 )
 
+# ============================================================
+# 🔒 CSS ANTI-JEJAK (hide GitHub, menu, footer, badge)
+# ============================================================
+hide_style = """
+<style>
+/* Sembunyikan header Streamlit (logo, hamburger, deploy button) */
+header[data-testid="stHeader"] {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+}
+
+/* Sembunyikan menu utama (3 titik kanan atas) */
+#MainMenu {
+    visibility: hidden !important;
+    display: none !important;
+}
+
+/* Sembunyikan footer */
+footer {
+    visibility: hidden !important;
+    display: none !important;
+}
+
+/* Sembunyikan badge "Made with Streamlit" / link GitHub viewer */
+[data-testid="stStatusWidget"] { display: none !important; }
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+
+/* Khusus badge viewer di pojok kanan bawah */
+.viewerBadge_container__1QSob,
+.viewerBadge_link__1S137,
+.viewerBadge_text__1JaDK,
+[class*="viewerBadge"] {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Sembunyikan tombol "Deploy" / "Manage app" */
+.stDeployButton { display: none !important; }
+[data-testid="stAppDeployButton"] { display: none !important; }
+
+/* Sembunyikan anchor link pada heading */
+.css-1k1mmv1, .css-15zrgzn, [data-testid="stHeaderActionElements"] {
+    display: none !important;
+}
+
+/* Sembunyikan sidebar toggle kalau gak butuh */
+[data-testid="stSidebarCollapsedControl"] {
+    display: none !important;
+}
+
+/* Rapikan padding atas karena header udah disembunyikan */
+.block-container {
+    padding-top: 1.5rem !important;
+}
+
+/* Sembunyikan "Running..." / spinner status */
+[data-testid="stStatusWidget"] { display: none !important; }
+</style>
+"""
+st.markdown(hide_style, unsafe_allow_html=True)
+
+# ============================================================
+# HEADER CUSTOM (ganti branding)
+# ============================================================
 st.title("📊 Dashboard POS")
 st.markdown("Upload database, lalu lihat ringkasan performa toko di bawah.")
 
@@ -145,7 +215,6 @@ if df_sale["date_tx"].notna().any():
         ) & (df_sale["date_tx"].dt.date <= tgl_range[1])
         df = df_sale[mask].copy()
 
-        # Filter non-commerce
         if not df_noncommerce.empty and "date_tx" in df_noncommerce.columns:
             df_noncommerce = df_noncommerce[
                 (df_noncommerce["date_tx"].dt.date >= tgl_range[0])
@@ -190,7 +259,6 @@ else:
     total_noncommerce = 0
     total_trx_noncommerce = 0
 
-# Non-commerce per kasir
 noncommerce_per_kasir = {}
 if not df_noncommerce.empty and "user_id" in df_noncommerce.columns:
     nc_group = (
@@ -218,11 +286,9 @@ total_omzet = df["total_faktur"].sum()
 total_struk = df["faktur"].nunique()
 total_cash_klerk = hitung_cash_klerk(df)
 
-# Omzet reguler = total - non-commerce
 total_omzet_reguler = total_omzet - total_noncommerce
 total_struk_reguler = total_struk - total_trx_noncommerce
 
-# Debit total
 total_debit = 0
 if not df_card.empty and "amount" in df_card.columns:
     df_card_temp = df_card.copy()
@@ -255,21 +321,18 @@ total_item = df["total_item"].sum() if "total_item" in df.columns else 0
 rata_struk = total_omzet_reguler / total_struk_reguler if total_struk_reguler > 0 else 0
 
 
-# KPI Baris 1 - Omzet
 st.markdown("##### 💰 Omzet")
 c1, c2, c3 = st.columns(3)
 c1.metric("💰 Omzet Reguler", "Rp " + format(total_omzet_reguler, ",.0f"))
 c2.metric("📱 Omzet Non-Commerce", "Rp " + format(total_noncommerce, ",.0f"))
 c3.metric("📊 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
 
-# KPI Baris 2 - Transaksi
 st.markdown("##### 🧾 Transaksi")
 c4, c5, c6 = st.columns(3)
 c4.metric("🧾 Total Struk Reguler", format(int(total_struk_reguler), ","))
 c5.metric("📱 Struk Non-Commerce", format(int(total_trx_noncommerce), ","))
 c6.metric("📦 Total Item", format(int(total_item), ","))
 
-# KPI Baris 3 - Pembayaran
 st.markdown("##### 💳 Pembayaran")
 c7, c8, c9, c10 = st.columns(4)
 c7.metric("💵 Cash Klerk", "Rp " + format(total_cash_klerk, ",.0f"))
@@ -359,7 +422,7 @@ else:
 
 
 # ============================================================
-# BREAKDOWN DEBIT PER BANK (BCA & YOKKE)
+# BREAKDOWN DEBIT PER BANK
 # ============================================================
 st.markdown("---")
 st.subheader("💳 Sales Debit per Bank")
@@ -380,7 +443,6 @@ if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.colum
                 & (df_card_temp["date_tx"].dt.date <= tgl_range[1])
             ]
 
-    # Hanya 2 kategori: BCA (kode 1) & Yokke (sisanya)
     KODE_BCA = 1
 
     def get_bank_kategori(bank_code):
@@ -528,70 +590,3 @@ if "user_id" in df.columns:
         "Sales_NonCommerce": "Sales Non-Commerce",
         "STD_Reguler": "STD Reguler",
         "STD_NonCommerce": "STD Non-Commerce",
-        "Sales_Member": "Sales Member",
-        "STD_Member": "STD Member",
-        "Cash_Klerk": "Cash Klerk",
-        "E_Wallet": "E-Wallet",
-    })
-
-    st.caption("Terdeteksi " + str(len(kasir_dict)) + " kasir dari log_receipt_prn.")
-    st.dataframe(rekap_display, use_container_width=True, hide_index=True)
-
-    total_row = pd.DataFrame([{
-        "NIK": "TOTAL",
-        "Nama Kasir": "-",
-        "Sales Reguler": "Rp " + format(rekap_kasir["Sales_Reguler"].sum(), ",.0f"),
-        "Sales Non-Commerce": "Rp " + format(rekap_kasir["Sales_NonCommerce"].sum(), ",.0f"),
-        "STD Reguler": int(rekap_kasir["STD_Reguler"].sum()),
-        "STD Non-Commerce": int(rekap_kasir["STD_NonCommerce"].sum()),
-        "Sales Member": "Rp " + format(rekap_kasir["Sales_Member"].sum(), ",.0f"),
-        "STD Member": int(rekap_kasir["STD_Member"].sum()),
-        "Cash Klerk": "Rp " + format(rekap_kasir["Cash_Klerk"].sum(), ",.0f"),
-        "Debit": "Rp " + format(rekap_kasir["Debit"].sum(), ",.0f"),
-        "E-Wallet": "Rp " + format(rekap_kasir["E_Wallet"].sum(), ",.0f"),
-    }])
-    st.dataframe(total_row, use_container_width=True, hide_index=True)
-
-    csv = rekap_kasir.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download Rekap Kasir (CSV)",
-        data=csv,
-        file_name="rekap_kasir.csv",
-        mime="text/csv",
-    )
-else:
-    st.info("Kolom user_id tidak ditemukan.")
-
-
-# ============================================================
-# HALAMAN LAIN
-# ============================================================
-st.markdown("---")
-st.markdown("### 📌 Halaman Lain")
-st.markdown(
-    "Buka **sidebar kiri** untuk:\n"
-    "- **1 PSM per PLU** — Laporan PSM berdasarkan PLU\n"
-    "- **2 SG per Paket** — Laporan Serba Gratis per paket\n"
-    "- **3 Topup Flaz** — Laporan topup Flaz\n"
-    "- **4 Cek Struk** — Cek struk by flag\n"
-    "- **5 Void Transaksi** — Laporan void"
-)
-
-
-# ============================================================
-# DEBUG
-# ============================================================
-with st.expander("🔍 Debug"):
-    st.write("Total baris tx_tsale: " + str(len(df_sale)))
-    st.write("Total baris tx_tsale_card: " + str(len(df_card)))
-    st.write("Total baris log_receipt_prn: " + str(len(df_receipt)))
-    st.write("Total baris tx_trans_non_commerce: " + str(len(df_noncommerce)))
-    st.write("Jumlah kasir di kasir_dict: " + str(len(kasir_dict)))
-    st.write("Contoh kasir_dict: ", dict(list(kasir_dict.items())[:5]))
-    st.write("Rentang tanggal: " + str(tgl_range))
-    st.write("Total Omzet: Rp " + format(total_omzet, ",.0f"))
-    st.write("Omzet Reguler: Rp " + format(total_omzet_reguler, ",.0f"))
-    st.write("Omzet Non-Commerce: Rp " + format(total_noncommerce, ",.0f"))
-    st.write("Kolom tx_tsale: ", df_sale.columns.tolist())
-    st.write("Kolom tx_tsale_card: ", df_card.columns.tolist() if not df_card.empty else "kosong")
-    st.write("Kolom tx_trans_non_commerce: ", df_noncommerce.columns.tolist() if not df_noncommerce.empty else "kosong")
