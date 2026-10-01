@@ -206,3 +206,10 @@ def back_to_menu():
     """Kembali ke menu pilih."""
     st.session_state.current_page = None
     st.rerun()
+
+def render_back_to_menu_button():
+    """Render tombol kembali ke menu."""
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("⬅️ Kembali ke Menu", use_container_width=True):
+            back_to_menu()
