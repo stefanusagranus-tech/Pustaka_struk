@@ -13,7 +13,7 @@ st.set_page_config(
     page_title="Dashboard POS",   # ganti kalau mau nama lain
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed",  # sidebar ketutup default
+    initial_sidebar_state="expanded",  # sidebar ketutup default
 )
 
 # ============================================================
@@ -63,10 +63,6 @@ footer {
     display: none !important;
 }
 
-/* Sembunyikan sidebar toggle kalau gak butuh */
-[data-testid="stSidebarCollapsedControl"] {
-    display: none !important;
-}
 
 /* Rapikan padding atas karena header udah disembunyikan */
 .block-container {
@@ -628,28 +624,17 @@ else:
 # ============================================================
 # HALAMAN LAIN
 # ============================================================
-# Di akhir App.py, ganti bagian "HALAMAN LAIN"
-
 st.markdown("---")
 st.markdown("### 📌 Halaman Lain")
+st.markdown(
+    "Buka **sidebar kiri** untuk:\n"
+    "- **1 PSM per PLU** — Laporan PSM berdasarkan PLU\n"
+    "- **2 SG per Paket** — Laporan Serba Gratis per paket\n"
+    "- **3 Topup Flaz** — Laporan topup Flaz\n"
+    "- **4 Cek Struk** — Cek struk by flag\n"
+    "- **5 Void Transaksi** — Laporan void"
+)
 
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("📊 1 PSM per PLU", use_container_width=True):
-        st.switch_page("pages/1_PSM_per_PLU.py")
-    if st.button("🎁 2 SG per Paket", use_container_width=True):
-        st.switch_page("pages/2_SG_per_Paket.py")
-
-with col2:
-    if st.button("📦 3 Topup Flaz", use_container_width=True):
-        st.switch_page("pages/5_Topup_Flaz.py")
-    if st.button("🧾 4 Cek Struk", use_container_width=True):
-        st.switch_page("pages/3_struk_Suger.py")
-
-with col3:
-    if st.button("❌ 5 Void Transaksi", use_container_width=True):
-        st.switch_page("pages/6_Cek_Struk_Void.py")
 
 # ============================================================
 # DEBUG (opsional, bisa dihapus kalau udah stabil)
