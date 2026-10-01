@@ -11,7 +11,7 @@ from utils.common import (
     get_struk_text, build_plu_name_dict,
 )
 from utils.plu_dict import get_nama_plu
-
+from utils.nav_helper import render_back_to_dashboard, safe_stop
 from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
 
 setup_anonim_page("Cek Struk", "🧾")
@@ -42,7 +42,7 @@ db_file = st.session_state.get("db_path", None)
 
 if not db_file:
     st.warning("Belum ada database. Buka halaman Home dulu untuk upload ZIP.")
-    st.stop()
+    st.save("struk")
 
 st.success("Database: " + st.session_state.get("db_name", ""))
 
@@ -57,11 +57,11 @@ try:
 
     if df_sale.empty:
         st.error("Tabel tx_tsale kosong.")
-        st.stop()
+        st.save("struk")
 
     if df_detail.empty:
         st.error("Tabel tx_trans kosong.")
-        st.stop()
+        st.save("struk")
 
     # ============================================================
     # NORMALISASI PLU
@@ -97,7 +97,7 @@ try:
 
     if df_suger_detail.empty:
         st.warning("Tidak ada item Suger di database ini.")
-        st.stop()
+        st.save("struk")
 
     # Konversi numerik
     for c in ["qty", "price", "disc", "promo_disc"]:
@@ -353,3 +353,4 @@ except Exception as e:
     st.exception(e)
 
 render_nav_universal("struk")
+render_back_to_dashboard("struk")
