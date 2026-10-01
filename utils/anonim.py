@@ -162,3 +162,81 @@ def render_footer(text="Dashboard POS v2.0"):
         f'{text}</div>',
         unsafe_allow_html=True
     )
+# ============================================================
+# NAVIGASI UNIVERSAL (untuk semua halaman)
+# ============================================================
+# Daftar semua halaman
+SEMUA_HALAMAN = [
+    {"id": "home",      "label": "🏠 Home",           "path": "pages/0_Home.py"},
+    {"id": "dashboard", "label": "📊 Dashboard",       "path": "App.py"},
+    {"id": "psm",       "label": "📊 1 PSM per PLU",   "path": "pages/1_PSM_per_PLU.py"},
+    {"id": "sg",        "label": "🎁 2 SG per Paket",  "path": "pages/2_SG_per_Paket.py"},
+    {"id": "topup",     "label": "📦 3 Topup Flaz",    "path": "pages/5_Topup_Flaz.py"},
+    {"id": "struk",     "label": "🧾 4 Cek Struk",     "path": "pages/3_struk_Suger.py"},
+    {"id": "void",      "label": "❌ 5 Void Transaksi", "path": "pages/6_Cek_Struk_Void.py"},
+]
+
+
+def render_nav_universal(current_id):
+    """
+    Render tombol navigasi universal.
+    Halaman yang lagi aktif TIDAK ditampilkan (biar gak aneh).
+    
+    Args:
+        current_id: ID halaman aktif (contoh: "psm", "sg", "dashboard")
+    """
+    st.markdown("---")
+    st.markdown("### 📌 Navigasi Halaman")
+
+    # Filter: buang halaman yang lagi aktif
+    halaman_lain = [h for h in SEMUA_HALAMAN if h["id"] != current_id]
+
+    if not halaman_lain:
+        st.info("Gak ada halaman lain.")
+        return
+
+    # Render tombol, 2 kolom
+    cols = st.columns(2)
+    for i, h in enumerate(halaman_lain):
+        with cols[i % 2]:
+            if st.button(h["label"], use_container_width=True, key=f"nav_{current_id}_{h['id']}"):
+                st.switch_page(h["path"])
+
+
+def render_back_button(target_path="pages/0_Home.py", label="🏠 Kembali ke Home"):
+    """
+    Render tombol 'Kembali' (opsional).
+    Cocok ditaruh di paling atas halaman biar user gampang balik.
+    """
+    if st.button(label, key=f"back_{label}"):
+        st.switch_page(target_path)
+
+
+# ============================================================
+# CSS TOMBOL NAVIGASI (biar gede & rapi)
+# ============================================================
+NAV_BUTTON_STYLE = """
+<style>
+/* Tombol navigasi lebih gede */
+.stButton > button {
+    padding: 18px 20px !important;
+    font-size: 1.05rem !important;
+    font-weight: 600 !important;
+    border-radius: 12px !important;
+    background: linear-gradient(135deg, #2196F3, #1565c0) !important;
+    color: white !important;
+    border: none !important;
+    transition: all 0.2s !important;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4) !important;
+}
+</style>
+"""
+
+
+def apply_nav_style():
+    """Apply CSS tombol navigasi."""
+    st.markdown(NAV_BUTTON_STYLE, unsafe_allow_html=True)
