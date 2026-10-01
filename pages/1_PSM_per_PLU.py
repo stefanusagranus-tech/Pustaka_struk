@@ -267,3 +267,5 @@ try:
 except Exception as e:
     st.error("Error: " + str(e))
     st.exception(e)
+    
+render_nav_universal("psm")
