@@ -27,3 +27,6 @@ migrate_log.txt
 
 # Uploads
 static/uploads/
+
+# Streamlit secrets
+.streamlit/secrets.toml
