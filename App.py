@@ -1,6 +1,6 @@
 """
 App.py — Pustaka Struk Main App
-Include: Login + Menu + Dashboard + Idea Box.
+Include: Login + Menu + Dashboard + Idea Box + Menu Analisis.
 """
 import streamlit as st
 import pandas as pd
@@ -8,10 +8,9 @@ import os
 import shutil
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-# Tambah path root
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from utils.common import (
@@ -132,7 +131,7 @@ def hapus_permanen(archive_index):
 
 
 # ============================================================
-# GENERATE BLUEPRINT DARI IDE
+# GENERATE BLUEPRINT
 # ============================================================
 def generate_steps(idea):
     return [
@@ -153,7 +152,6 @@ def generate_blueprint_md(idea):
     """Generate blueprint markdown siap kirim ke AI."""
     steps = generate_steps(idea)
 
-    # Header
     lines = []
     lines.append("# BLUEPRINT: " + str(idea['judul']))
     lines.append("")
@@ -187,10 +185,8 @@ def generate_blueprint_md(idea):
     lines.append("")
     lines.append("## Step-by-Step")
     lines.append("")
-
     for i, step in enumerate(steps, 1):
         lines.append(str(i) + ". [ ] " + str(step))
-
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -226,21 +222,18 @@ def generate_blueprint_md(idea):
 
     return "\n".join(lines)
 
+
 # ============================================================
 # ROUTING
 # ============================================================
 
-# === 1. Belum login → login screen ===
 if not st.session_state.logged_in:
     render_login_screen()
     st.stop()
 
-# === 2. Belum pilih → menu screen ===
 if st.session_state.current_page is None:
     render_menu_screen()
     st.stop()
-
-# === 3. Sudah pilih → render halaman ===
 
 # Top bar
 col1, col2, col3 = st.columns([3, 1, 1])
@@ -583,6 +576,42 @@ if st.session_state.current_page == "dashboard":
             mime="text/csv",
         )
 
+    # ============================================================
+    # 🆕 MENU HALAMAN ANALISIS (muncul setelah database diupload)
+    # ============================================================
+    st.markdown("---")
+    st.markdown("### 📂 Halaman Analisis")
+    st.caption("Database udah ke-load — tap tombol di bawah buat analisis")
+
+    col_a1, col_a2 = st.columns(2)
+
+    with col_a1:
+        if st.button("📊 1 PSM per PLU", use_container_width=True, key="dash_nav_psm"):
+            st.switch_page("pages/1_PSM_per_PLU.py")
+        if st.button("📦 3 Topup Flaz", use_container_width=True, key="dash_nav_topup"):
+            st.switch_page("pages/5_Topup_Flaz.py")
+
+    with col_a2:
+        if st.button("🎁 2 SG per Paket", use_container_width=True, key="dash_nav_sg"):
+            st.switch_page("pages/2_SG_per_Paket.py")
+        if st.button("🧾 4 Cek Struk", use_container_width=True, key="dash_nav_struk"):
+            st.switch_page("pages/3_struk_Suger.py")
+
+    st.markdown("---")
+
+    st.markdown("### 🔧 Tools")
+    st.caption("Alat bantu audit")
+
+    col_t1, col_t2 = st.columns(2)
+
+    with col_t1:
+        if st.button("🧾 Cek Struk Detail", use_container_width=True, key="dash_nav_cek_struk"):
+            st.switch_page("pages/3_struk_Suger.py")
+
+    with col_t2:
+        if st.button("❌ Void Transaksi", use_container_width=True, key="dash_nav_void"):
+            st.switch_page("pages/6_Cek_Struk_Void.py")
+
 # ⬇️⬇️⬇️ LANJUT KE BAGIAN 3 ⬇️⬇️⬇️
 # ============================================================
 # HALAMAN: IDEA BOX
@@ -593,11 +622,9 @@ elif st.session_state.current_page == "idea_box":
     st.markdown("Tulis ide → auto-generate blueprint → copy ke AI lain.")
     st.markdown("---")
 
-    # Session state
     if "confirm_delete" not in st.session_state:
         st.session_state.confirm_delete = None
 
-    # Tabs
     tab1, tab2, tab3, tab4 = st.tabs([
         "➕ Tambah Ide",
         "📋 Daftar Ide",
@@ -613,35 +640,18 @@ elif st.session_state.current_page == "idea_box":
             col1, col2 = st.columns(2)
 
             with col1:
-                judul = st.text_input(
-                    "Judul Ide *",
-                    placeholder="Contoh: Analisis Jam Ramai per Kasir"
-                )
-                kategori = st.selectbox(
-                    "Kategori",
-                    ["Analytics", "Visualisasi", "Audit", "Monitoring", "Lainnya"]
-                )
-                prioritas = st.selectbox(
-                    "Prioritas",
-                    ["Rendah", "Sedang", "Tinggi", "Urgent"]
-                )
+                judul = st.text_input("Judul Ide *", placeholder="Contoh: Analisis Jam Ramai per Kasir")
+                kategori = st.selectbox("Kategori", ["Analytics", "Visualisasi", "Audit", "Monitoring", "Lainnya"])
+                prioritas = st.selectbox("Prioritas", ["Rendah", "Sedang", "Tinggi", "Urgent"])
 
             with col2:
                 estimasi = st.number_input("Estimasi (hari)", min_value=1, max_value=30, value=2)
                 file_target = st.text_input("File Target", placeholder="pages/14_Fitur_Baru.py")
                 catatan = st.text_area("Catatan (opsional)", placeholder="Butuh join tabel X + Y...", height=80)
 
-            deskripsi = st.text_area(
-                "Deskripsi Ide *",
-                placeholder="Jelaskan sedetail mungkin apa yang kamu mau...",
-                height=120
-            )
+            deskripsi = st.text_area("Deskripsi Ide *", placeholder="Jelaskan sedetail mungkin...", height=120)
 
-            submitted = st.form_submit_button(
-                "🚀 Generate Blueprint",
-                type="primary",
-                use_container_width=True
-            )
+            submitted = st.form_submit_button("🚀 Generate Blueprint", type="primary", use_container_width=True)
 
         if submitted:
             if not judul or not deskripsi:
@@ -662,10 +672,8 @@ elif st.session_state.current_page == "idea_box":
                     "file_target": [file_target] if file_target else [f"pages/{new_id}.py"],
                     "catatan": catatan,
                 }
-
                 ideas_data["ideas"].append(new_idea)
                 save_ideas(ideas_data)
-
                 st.success("✅ Ide berhasil ditambahkan!")
                 st.balloons()
                 st.rerun()
@@ -676,24 +684,15 @@ elif st.session_state.current_page == "idea_box":
 
         col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
         with col_f1:
-            filter_status = st.multiselect(
-                "Filter Status",
-                ["pending", "in_progress", "done"],
-                default=["pending", "in_progress"]
-            )
+            filter_status = st.multiselect("Filter Status", ["pending", "in_progress", "done"], default=["pending", "in_progress"])
         with col_f2:
-            filter_prioritas = st.multiselect(
-                "Filter Prioritas",
-                ["Rendah", "Sedang", "Tinggi", "Urgent"],
-                default=["Rendah", "Sedang", "Tinggi", "Urgent"]
-            )
+            filter_prioritas = st.multiselect("Filter Prioritas", ["Rendah", "Sedang", "Tinggi", "Urgent"], default=["Rendah", "Sedang", "Tinggi", "Urgent"])
         with col_f3:
             sort_by = st.selectbox("Sort", ["Terbaru", "Prioritas", "Judul"])
 
         filtered = [
             (i, idea) for i, idea in enumerate(ideas_data["ideas"])
-            if idea["status"] in filter_status
-            and idea["prioritas"] in filter_prioritas
+            if idea["status"] in filter_status and idea["prioritas"] in filter_prioritas
         ]
 
         if sort_by == "Terbaru":
@@ -736,14 +735,7 @@ elif st.session_state.current_page == "idea_box":
                     col_a, col_b, col_c, col_d = st.columns(4)
 
                     with col_a:
-                        st.download_button(
-                            "📥 Download",
-                            data=md,
-                            file_name=f"{idea['id']}.md",
-                            mime="text/markdown",
-                            key=f"dl_{idea['id']}",
-                            use_container_width=True,
-                        )
+                        st.download_button("📥 Download", data=md, file_name=f"{idea['id']}.md", mime="text/markdown", key=f"dl_{idea['id']}", use_container_width=True)
 
                     with col_b:
                         if st.button("📋 Copy", key=f"copy_{idea['id']}", use_container_width=True):
@@ -774,7 +766,6 @@ elif st.session_state.current_page == "idea_box":
 
             if 0 <= idx < len(ideas_data["ideas"]):
                 idea = ideas_data["ideas"][idx]
-                st.error("⚠️ Yakin mau hapus ide ini?")
                 st.error("⚠️ Yakin mau hapus ide ini?")
                 st.markdown(f"**Judul:** {idea['judul']}")
                 st.markdown(f"**Kategori:** {idea['kategori']}")
@@ -888,11 +879,4 @@ elif st.session_state.current_page == "idea_box":
 # FOOTER
 # ============================================================
 st.markdown("---")
-st.caption("Pustaka Struk v2.0 — Untuk orang beramin")
-
-# Tombol kembali ke menu utama
-st.markdown("---")
-col_back1, col_back2, col_back3 = st.columns([1, 1, 1])
-with col_back2:
-    if st.button("🏠 Kembali ke Menu Utama", use_container_width=True, key="back_to_menu_xxx"):
-        st.switch_page("App.py")
+st.caption("Pustaka Struk v2.0 — Internal use only")
