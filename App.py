@@ -606,7 +606,7 @@ if st.session_state.current_page == "dashboard":
 
     with col_t1:
         if st.button("🧾 Cek Struk Detail", use_container_width=True, key="dash_nav_cek_struk"):
-            st.switch_page("pages/3_struk_Suger.py")
+            st.switch_page("pages/7_Cek_Struk_Detail.py")
 
     with col_t2:
         if st.button("❌ Void Transaksi", use_container_width=True, key="dash_nav_void"):
