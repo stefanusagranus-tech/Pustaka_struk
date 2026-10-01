@@ -11,11 +11,10 @@ from utils.common import (
     get_struk_text, build_plu_name_dict,
 )
 
-st.set_page_config(
-    page_title="Void Transaksi",
-    page_icon="🚫",
-    layout="wide",
-)
+from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
+
+setup_anonim_page("Cek Struk Void", "❌")
+apply_nav_style()
 
 st.title("🚫 Laporan Void Transaksi")
 st.markdown("Menampilkan transaksi yang dibatalkan (void) dari `tx_trans`.")
@@ -352,3 +351,5 @@ try:
 except Exception as e:
     st.error("Error: " + str(e))
     st.exception(e)
+
+render_nav_universal("void")
