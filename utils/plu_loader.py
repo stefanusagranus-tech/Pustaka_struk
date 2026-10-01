@@ -1,10 +1,11 @@
 """
 utils/plu_loader.py
-Helper untuk load & manage file CSV PLU per kategori & periode.
-Kategori: psm, sg, pwp, suger
+Helper untuk load & manage file PLU per kategori & periode.
+Support: CSV, Excel (.xlsx/.xls), PDF.
 """
 import os
 import re
+import io
 import pandas as pd
 from datetime import date, datetime
 from pathlib import Path
@@ -15,45 +16,172 @@ from pathlib import Path
 # ============================================================
 DATA_DIR = "data/plu"
 
-# Kategori yang didukung
 KATEGORI = {
-    "psm": {
-        "nama": "PSM",
-        "icon": "📊",
-        "desc": "PLU harga spesial",
-    },
-    "sg": {
-        "nama": "Serba Gratis (SG)",
-        "icon": "🎁",
-        "desc": "PLU beli X gratis Y",
-    },
-    "pwp": {
-        "nama": "PWP",
-        "icon": "🛒",
-        "desc": "Promo What Purchase",
-    },
-    "suger": {
-        "nama": "Suger",
-        "icon": "🍬",
-        "desc": "PLU kategori suger",
-    },
+    "psm": {"nama": "PSM", "icon": "📊", "desc": "PLU harga spesial"},
+    "sg": {"nama": "Serba Gratis (SG)", "icon": "🎁", "desc": "PLU beli X gratis Y"},
+    "pwp": {"nama": "PWP", "icon": "🛒", "desc": "Promo What Purchase"},
+    "suger": {"nama": "Suger", "icon": "🍬", "desc": "PLU kategori suger"},
 }
+
+# Format yang didukung
+SUPPORTED_EXTENSIONS = ["csv", "xlsx", "xls", "pdf"]
 
 
 def get_kategori_dir(kategori):
-    """Path folder untuk kategori tertentu."""
     return os.path.join(DATA_DIR, kategori)
+
+
+# ============================================================
+# HELPER: BACA CSV
+# ============================================================
+def _safe_read_csv(filepath_or_buffer):
+    """Baca CSV dengan berbagai fallback."""
+    for kwargs in [
+        {},
+        {"on_bad_lines": "skip"},
+        {"engine": "python", "on_bad_lines": "skip"},
+        {"sep": None, "engine": "python", "on_bad_lines": "skip"},
+    ]:
+        try:
+            if hasattr(filepath_or_buffer, "seek"):
+                filepath_or_buffer.seek(0)
+            return pd.read_csv(filepath_or_buffer, **kwargs)
+        except Exception:
+            continue
+    raise Exception("Semua cara baca CSV gagal")
+
+
+# ============================================================
+# HELPER: BACA EXCEL
+# ============================================================
+def _safe_read_excel(filepath_or_buffer):
+    """Baca Excel file."""
+    try:
+        if hasattr(filepath_or_buffer, "seek"):
+            filepath_or_buffer.seek(0)
+        return pd.read_excel(filepath_or_buffer)
+    except Exception as e:
+        raise Exception(f"Gagal baca Excel: {e}")
+
+
+# ============================================================
+# HELPER: BACA PDF
+# ============================================================
+def _read_pdf_tables(filepath_or_buffer):
+    """
+    Baca tabel dari PDF pakai pdfplumber.
+    Return list of DataFrame (1 per halaman).
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        raise Exception("Library pdfplumber belum terinstall. "
+                        "Tambah 'pdfplumber' di requirements.txt")
+
+    dfs = []
+
+    try:
+        with pdfplumber.open(filepath_or_buffer) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                # Coba extract tables
+                tables = page.extract_tables()
+
+                if not tables:
+                    # Fallback: extract text jadi 1 kolom
+                    text = page.extract_text()
+                    if text:
+                        lines = text.split("\n")
+                        dfs.append(pd.DataFrame({"text": lines}))
+                    continue
+
+                for table in tables:
+                    if not table or len(table) < 2:
+                        continue
+
+                    # Baris pertama = header
+                    header = table[0]
+                    rows = table[1:]
+
+                    # Bersihkan header
+                    header = [
+                        str(h).strip() if h else f"col_{i}"
+                        for i, h in enumerate(header)
+                    ]
+
+                    df = pd.DataFrame(rows, columns=header)
+                    dfs.append(df)
+    except Exception as e:
+        raise Exception(f"Gagal baca PDF: {e}")
+
+    return dfs
+
+
+def _pdf_to_dataframe(filepath_or_buffer, target_plu=True):
+    """
+    Baca PDF → gabungkan semua tabel → cari kolom PLU.
+    Return DataFrame.
+    """
+    dfs = _read_pdf_tables(filepath_or_buffer)
+
+    if not dfs:
+        raise Exception("PDF tidak punya tabel yang bisa dibaca.")
+
+    # Cari DataFrame yang punya kolom PLU
+    for df in dfs:
+        # Cek kolom header
+        for col in df.columns:
+            col_lower = str(col).strip().lower()
+            if "plu" in col_lower:
+                return df
+
+    # Kalau gak ada kolom PLU di header, coba pakai tabel pertama
+    # dan cari kolom yang isinya angka semua (kandidat PLU)
+    main_df = dfs[0]
+
+    return main_df
+
+
+# ============================================================
+# HELPER: DETEKSI FORMAT
+# ============================================================
+def _detect_and_read(filepath_or_buffer, filename=""):
+    """
+    Auto-detect format dari nama file / isi.
+    Return DataFrame.
+    """
+    filename_lower = str(filename).lower()
+
+    # Deteksi dari ekstensi
+    if filename_lower.endswith(".csv"):
+        return _safe_read_csv(filepath_or_buffer), "csv"
+
+    if filename_lower.endswith(".xlsx") or filename_lower.endswith(".xls"):
+        return _safe_read_excel(filepath_or_buffer), "excel"
+
+    if filename_lower.endswith(".pdf"):
+        return _pdf_to_dataframe(filepath_or_buffer), "pdf"
+
+    # Fallback: coba CSV dulu, baru Excel
+    try:
+        return _safe_read_csv(filepath_or_buffer), "csv"
+    except Exception:
+        pass
+
+    try:
+        return _safe_read_excel(filepath_or_buffer), "excel"
+    except Exception:
+        pass
+
+    raise Exception(
+        "Format file tidak dikenali. Gunakan CSV, Excel, atau PDF."
+    )
 
 
 # ============================================================
 # PARSE NAMA FILE
 # ============================================================
 def parse_filename(filename):
-    """
-    Parse nama file: '2026-10-01_15.csv' → dict info.
-    Format: YYYY-MM-DD_DD.csv
-    """
-    name = filename.replace(".csv", "")
+    name = re.sub(r"\.(csv|xlsx|xls|pdf)$", "", filename, flags=re.IGNORECASE)
     match = re.match(r"(\d{4})-(\d{2})-(\d{2})_(\d{2})", name)
     if not match:
         return None
@@ -74,22 +202,22 @@ def parse_filename(filename):
 
 
 # ============================================================
-# LIST FILE PER KATEGORI
+# LIST FILE
 # ============================================================
 def list_plu_files(kategori):
-    """List semua file CSV PLU di folder kategori tertentu."""
     folder = get_kategori_dir(kategori)
-
     if not os.path.exists(folder):
         return []
 
     files = []
     for f in os.listdir(folder):
-        if f.endswith(".csv"):
+        ext = f.rsplit(".", 1)[-1].lower() if "." in f else ""
+        if ext in SUPPORTED_EXTENSIONS:
             info = parse_filename(f)
             if info:
                 info["path"] = os.path.join(folder, f)
                 info["kategori"] = kategori
+                info["format"] = ext
                 files.append(info)
 
     files.sort(key=lambda x: (x["tahun"], x["bulan"], x["tgl_awal"]))
@@ -97,7 +225,6 @@ def list_plu_files(kategori):
 
 
 def list_all_files():
-    """List semua file di semua kategori."""
     result = {}
     for kat in KATEGORI.keys():
         result[kat] = list_plu_files(kat)
@@ -108,42 +235,37 @@ def list_all_files():
 # FIND FILE BY DATE
 # ============================================================
 def find_file_by_date(kategori, tgl):
-    """Cari file PLU untuk kategori & tanggal tertentu."""
     files = list_plu_files(kategori)
-
     for f in files:
         if (f["tahun"] == tgl.year
                 and f["bulan"] == tgl.month
                 and f["tgl_awal"] <= tgl.day <= f["tgl_akhir"]):
             return f
-
     return None
 
 
 # ============================================================
-# LOAD PLU DARI FILE
+# LOAD PLU
 # ============================================================
-def load_plu_from_file(filepath):
-    """
-    Baca file CSV PLU. Return list of dict.
-    Kolom wajib: PLU
-    Kolom optional: Desc, Mekanisme, Brand, Kat, Qty, dll.
-    """
-    if not os.path.exists(filepath):
+def _extract_plu_from_df(df):
+    """Ekstrak PLU dari DataFrame. Return list of dict."""
+    if df.empty:
         return []
 
-    try:
-        df = pd.read_csv(filepath)
-    except Exception as e:
-        print(f"Error baca {filepath}: {e}")
-        return []
-
-    # Cari kolom PLU (case-insensitive)
+    # Cari kolom PLU (case-insensitive, partial match)
     plu_col = None
     for col in df.columns:
-        if col.strip().lower() == "plu":
+        col_lower = str(col).strip().lower()
+        if col_lower == "plu":
             plu_col = col
             break
+
+    # Kalau gak ada exact "plu", coba kolom yang mengandung "plu"
+    if plu_col is None:
+        for col in df.columns:
+            if "plu" in str(col).strip().lower():
+                plu_col = col
+                break
 
     if plu_col is None:
         return []
@@ -155,11 +277,10 @@ def load_plu_from_file(filepath):
         except (ValueError, TypeError):
             continue
 
-        # Ambil info tambahan
         info = {"plu": plu_val}
 
         for col in df.columns:
-            col_lower = col.strip().lower()
+            col_lower = str(col).strip().lower()
             if col_lower in ["desc", "description", "nama"]:
                 info["nama"] = str(row[col]) if pd.notna(row[col]) else ""
             elif col_lower == "mekanisme":
@@ -184,53 +305,86 @@ def load_plu_from_file(filepath):
     return result
 
 
-def load_plu_by_date(kategori, tgl):
-    """Load PLU untuk kategori & tanggal tertentu."""
-    file_info = find_file_by_date(kategori, tgl)
+def load_plu_from_file(filepath):
+    """Load PLU dari file (auto-detect format)."""
+    if not os.path.exists(filepath):
+        return []
 
+    try:
+        with open(filepath, "rb") as f:
+            df, fmt = _detect_and_read(f, filename=filepath)
+    except Exception as e:
+        print(f"Error baca {filepath}: {e}")
+        return []
+
+    return _extract_plu_from_df(df)
+
+
+def load_plu_by_date(kategori, tgl):
+    file_info = find_file_by_date(kategori, tgl)
     if file_info is None:
         return [], None
-
     plu_list = load_plu_from_file(file_info["path"])
     return plu_list, file_info
 
 
 # ============================================================
-# SAVE FILE
+# SAVE
 # ============================================================
 def save_plu_csv(uploaded_file, kategori, tahun, bulan, tgl_awal, tgl_akhir):
-    """Simpan file CSV yang diupload ke kategori tertentu."""
+    """
+    Simpan file PLU yang diupload.
+    Support: CSV, Excel, PDF.
+    File akan disimpan dalam format CSV agar ringan.
+    """
     folder = get_kategori_dir(kategori)
     os.makedirs(folder, exist_ok=True)
 
-    # Validasi
+    # Baca file apapun formatnya
     try:
-        df = pd.read_csv(uploaded_file)
+        df, fmt = _detect_and_read(uploaded_file, filename=uploaded_file.name)
     except Exception as e:
-        return False, f"Gagal baca CSV: {e}", None
+        return False, f"Gagal baca file: {e}", None
+
+    if df.empty:
+        return False, "File kosong atau tidak ada data.", None
 
     # Cek kolom PLU
     plu_col = None
     for col in df.columns:
-        if col.strip().lower() == "plu":
+        if str(col).strip().lower() == "plu":
             plu_col = col
             break
 
     if plu_col is None:
-        return False, "Kolom 'PLU' tidak ditemukan di CSV.", None
+        for col in df.columns:
+            if "plu" in str(col).strip().lower():
+                plu_col = col
+                break
 
-    # Nama file
+    if plu_col is None:
+        return False, (
+            "Kolom 'PLU' tidak ditemukan. "
+            f"Kolom yang ada: {', '.join(str(c) for c in df.columns)}"
+        ), None
+
+    # Bersihkan: buang baris yang PLU kosong
+    df = df[df[plu_col].notna()].copy()
+
+    # Nama file (selalu simpan sebagai CSV)
     filename = f"{tahun}-{bulan:02d}-{tgl_awal:02d}_{tgl_akhir:02d}.csv"
     filepath = os.path.join(folder, filename)
 
-    # Simpan
+    # Simpan sebagai CSV
     df.to_csv(filepath, index=False)
 
-    return True, f"File disimpan: {filename} ({len(df)} PLU)", filepath
+    return True, (
+        f"File disimpan: {filename} "
+        f"({len(df)} PLU, dari format {fmt.upper()})"
+    ), filepath
 
 
 def delete_plu_file(kategori, filename):
-    """Hapus file PLU."""
     filepath = os.path.join(get_kategori_dir(kategori), filename)
     if os.path.exists(filepath):
         os.remove(filepath)
@@ -242,7 +396,6 @@ def delete_plu_file(kategori, filename):
 # STATISTIK
 # ============================================================
 def get_stats():
-    """Statistik file per kategori."""
     stats = {}
     for kat, info in KATEGORI.items():
         files = list_plu_files(kat)
