@@ -5,71 +5,18 @@ import shutil
 from utils.common import extract_zip_and_find_db
 from utils.common import load_tables
 from utils.common import build_kasir_dict_from_receipt
+from utils.anonim import setup_anonim_page, hide_only
 
 # ============================================================
-# 🔒 KONFIGURASI ANONIM (PILIHAN 4 - REKOMENDASI)
+# 🔒 SETUP ANONIM (WAJIB PALING ATAS)
 # ============================================================
-st.set_page_config(
-    page_title="Dashboard POS",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",  # ← sidebar kebuka dari awal
-)
+# Opsi 1: Full setup (set_page_config + CSS anti-jejak)
+setup_anonim_page("Dashboard POS", "📊")
 
-# ============================================================
-# 🔒 CSS ANTI-JEJAK
-# Yang disembunyikan: header, menu, footer, GitHub badge, deploy button
-# Yang DIBIARKAN: sidebar toggle (biar navigasi gampang)
-# ============================================================
-hide_style = """
-<style>
-/* Sembunyikan header Streamlit (logo, hamburger, deploy button) */
-header[data-testid="stHeader"] {
-    display: none !important;
-    visibility: hidden !important;
-    height: 0 !important;
-}
-
-/* Sembunyikan menu utama (3 titik kanan atas) */
-#MainMenu {
-    visibility: hidden !important;
-    display: none !important;
-}
-
-/* Sembunyikan footer */
-footer {
-    visibility: hidden !important;
-    display: none !important;
-}
-
-/* Sembunyikan badge viewer + link GitHub */
-.viewerBadge_container__1QSob,
-.viewerBadge_link__1S137,
-.viewerBadge_text__1JaDK,
-[class*="viewerBadge"] {
-    display: none !important;
-    visibility: hidden !important;
-}
-
-/* Sembunyikan tombol Deploy */
-.stDeployButton { display: none !important; }
-[data-testid="stAppDeployButton"] { display: none !important; }
-[data-testid="stToolbar"] { display: none !important; }
-[data-testid="stDecoration"] { display: none !important; }
-[data-testid="stStatusWidget"] { display: none !important; }
-
-/* Sembunyikan anchor link pada heading */
-[data-testid="stHeaderActionElements"] {
-    display: none !important;
-}
-
-/* Rapikan padding atas */
-.block-container {
-    padding-top: 1.5rem !important;
-}
-</style>
-"""
-st.markdown(hide_style, unsafe_allow_html=True)
+# Catatan: Kalau kamu mau pakai set_page_config sendiri, pakai:
+#   st.set_page_config(...)
+#   hide_only()
+# Tapi karena pakai setup_anonim_page(), gak perlu set_page_config lagi.
 
 # ============================================================
 # HEADER CUSTOM
@@ -207,7 +154,6 @@ if df_sale["date_tx"].notna().any():
         ) & (df_sale["date_tx"].dt.date <= tgl_range[1])
         df = df_sale[mask].copy()
 
-        # Filter non-commerce
         if not df_noncommerce.empty and "date_tx" in df_noncommerce.columns:
             df_noncommerce = df_noncommerce[
                 (df_noncommerce["date_tx"].dt.date >= tgl_range[0])
@@ -252,7 +198,6 @@ else:
     total_noncommerce = 0
     total_trx_noncommerce = 0
 
-# Non-commerce per kasir
 noncommerce_per_kasir = {}
 if not df_noncommerce.empty and "user_id" in df_noncommerce.columns:
     nc_group = (
@@ -280,11 +225,9 @@ total_omzet = df["total_faktur"].sum()
 total_struk = df["faktur"].nunique()
 total_cash_klerk = hitung_cash_klerk(df)
 
-# Omzet reguler = total - non-commerce
 total_omzet_reguler = total_omzet - total_noncommerce
 total_struk_reguler = total_struk - total_trx_noncommerce
 
-# Debit total
 total_debit = 0
 if not df_card.empty and "amount" in df_card.columns:
     df_card_temp = df_card.copy()
@@ -314,24 +257,20 @@ else:
     total_sales_member = 0
 
 total_item = df["total_item"].sum() if "total_item" in df.columns else 0
-rata_struk = total_omzet_reguler / total_struk_reguler if total_struk_reguler > 0 else 0
 
 
-# KPI Baris 1 - Omzet
 st.markdown("##### 💰 Omzet")
 c1, c2, c3 = st.columns(3)
 c1.metric("💰 Omzet Reguler", "Rp " + format(total_omzet_reguler, ",.0f"))
 c2.metric("📱 Omzet Non-Commerce", "Rp " + format(total_noncommerce, ",.0f"))
 c3.metric("📊 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
 
-# KPI Baris 2 - Transaksi
 st.markdown("##### 🧾 Transaksi")
 c4, c5, c6 = st.columns(3)
 c4.metric("🧾 Total Struk Reguler", format(int(total_struk_reguler), ","))
 c5.metric("📱 Struk Non-Commerce", format(int(total_trx_noncommerce), ","))
 c6.metric("📦 Total Item", format(int(total_item), ","))
 
-# KPI Baris 3 - Pembayaran
 st.markdown("##### 💳 Pembayaran")
 c7, c8, c9, c10 = st.columns(4)
 c7.metric("💵 Cash Klerk", "Rp " + format(total_cash_klerk, ",.0f"))
@@ -442,7 +381,6 @@ if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.colum
                 & (df_card_temp["date_tx"].dt.date <= tgl_range[1])
             ]
 
-    # Hanya 2 kategori: BCA (kode 1) & Yokke (sisanya)
     KODE_BCA = 1
 
     def get_bank_kategori(bank_code):
