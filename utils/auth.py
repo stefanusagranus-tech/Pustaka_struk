@@ -1,3 +1,54 @@
+"""
+utils/auth.py
+Helper untuk login screen bergaya Yorushika + menu pilih.
+"""
+import streamlit as st
+import time
+import os
+
+
+# ============================================================
+# KONFIGURASI
+# ============================================================
+MAX_ATTEMPTS = 3
+LOCK_DURATION = 60  # detik (fallback kalau window.close() gagal)
+
+
+# ============================================================
+# AMBIL PASSWORD DARI SECRETS
+# ============================================================
+def get_password():
+    """
+    Ambil password dari Streamlit Secrets.
+    Fallback ke environment variable kalau gak ada.
+    """
+    try:
+        if "password" in st.secrets:
+            return st.secrets["password"]
+    except Exception:
+        pass
+
+    return os.environ.get("APP_PASSWORD", "AmeToCappuccino")
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+def init_auth_state():
+    """Inisialisasi session state untuk auth."""
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if "login_attempts" not in st.session_state:
+        st.session_state.login_attempts = 0
+    if "lock_until" not in st.session_state:
+        st.session_state.lock_until = 0
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = None
+
+
+# ============================================================
+# LOGIN SCREEN (Yorushika Style)
+# ============================================================
 def render_login_screen():
     """Tampilkan login screen bergaya Yorushika."""
 
@@ -55,27 +106,40 @@ def render_login_screen():
                 sisa = MAX_ATTEMPTS - st.session_state.login_attempts
 
                 if sisa <= 0:
-                    # 3x salah → close web
-                    st.error("❌ Maaf Lagu tidak ditemukan. Web akan ditutup...")
+                    # 3x salah → coba close web
+                    st.error("❌ Maaf Lagu tidak ditemukan.")
+                    st.warning("🔒 Terlalu banyak percobaan. Web akan ditutup...")
                     time.sleep(2)
+
+                    # Coba close via JS
                     st.markdown("""
                     <script>
-                    window.close();
+                    try {
+                        window.open('', '_self', '');
+                        window.close();
+                    } catch(e) {}
                     setTimeout(function() {
-                        window.location.href = "about:blank";
+                        window.location.href = 'about:blank';
                     }, 500);
                     </script>
                     """, unsafe_allow_html=True)
+
+                    # Fallback: lock 5 menit
+                    st.session_state.lock_until = time.time() + 300
+                    st.session_state.login_attempts = 0
                     st.stop()
                 else:
                     st.error(f"❌ Maaf Lagu tidak ditemukan. Sisa percobaan: {sisa}")
 
         st.markdown("---")
-        st.caption("💡 Hint: Coba pikirkan lagu favoritmu.")
+        st.caption("💡 Hint: Pikirkan lagu Yorushika favoritmu.")
 
     return False
 
 
+# ============================================================
+# MENU SCREEN
+# ============================================================
 def render_menu_screen():
     """Tampilkan menu pilih Dashboard / Idea Box."""
 
@@ -140,3 +204,44 @@ def render_menu_screen():
     with col_l2:
         if st.button("🚪 Logout", use_container_width=True):
             logout()
+
+# ⬇️⬇️⬇️ LANJUT KE BAGIAN 2 ⬇️⬇️⬇️
+
+# ============================================================
+# LOGOUT
+# ============================================================
+def logout():
+    """Logout user."""
+    st.session_state.logged_in = False
+    st.session_state.login_attempts = 0
+    st.session_state.lock_until = 0
+    st.session_state.current_page = None
+    st.rerun()
+
+
+# ============================================================
+# BACK TO MENU
+# ============================================================
+def back_to_menu():
+    """Kembali ke menu pilih."""
+    st.session_state.current_page = None
+    st.rerun()
+
+
+# ============================================================
+# BACK TO DASHBOARD (dari halaman analisis)
+# ============================================================
+def render_back_to_dashboard(key_suffix="default"):
+    """
+    Render tombol kembali ke Dashboard (App.py).
+    Panggil di bawah halaman pages/*.py.
+    """
+    st.markdown("---")
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button(
+            "🏠 Kembali ke Dashboard",
+            use_container_width=True,
+            key=f"back_to_dash_{key_suffix}",
+        ):
+            st.switch_page("App.py")
