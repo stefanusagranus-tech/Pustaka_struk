@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import pandas as pd
 import streamlit as st
 from utils.common import load_tables
-
+from utils.nav_helper import render_back_to_dashboard, safe_stop
 from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
 
 setup_anonim_page("Topup Flaz", "📦")
@@ -18,7 +18,7 @@ db_file = st.session_state.get("db_path", None)
 
 if not db_file:
     st.warning("Belum ada database. Buka halaman Home dulu untuk upload ZIP.")
-    st.stop()
+    st.save("topup")
 
 st.success("Database: " + st.session_state.get("db_name", ""))
 
@@ -28,7 +28,7 @@ try:
 
     if df_topup.empty:
         st.warning("Tidak ada data di tabel tx_trans_non_commerce.")
-        st.stop()
+        st.save("topup")
 
     # Konversi tipe
     df_topup["date_tx"] = pd.to_datetime(df_topup["date_tx"], errors="coerce")
@@ -76,7 +76,7 @@ try:
 
     if df.empty:
         st.warning("Tidak ada transaksi di rentang tanggal ini.")
-        st.stop()
+        st.save("topup")
 
     # ============================================================
     # KPI
@@ -209,3 +209,4 @@ except Exception as e:
     st.exception(e)
 
 render_nav_universal("topup")
+render_back_to_dashboard("topup")
