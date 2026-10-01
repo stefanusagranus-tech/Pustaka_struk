@@ -1,6 +1,7 @@
 """
 utils/plu_loader.py
-Helper untuk load & manage file CSV PLU per periode.
+Helper untuk load & manage file CSV PLU per kategori & periode.
+Kategori: psm, sg, pwp, suger
 """
 import os
 import re
@@ -12,7 +13,36 @@ from pathlib import Path
 # ============================================================
 # KONFIGURASI
 # ============================================================
-DATA_DIR = "data/plu_psm"
+DATA_DIR = "data/plu"
+
+# Kategori yang didukung
+KATEGORI = {
+    "psm": {
+        "nama": "PSM",
+        "icon": "📊",
+        "desc": "PLU harga spesial",
+    },
+    "sg": {
+        "nama": "Serba Gratis (SG)",
+        "icon": "🎁",
+        "desc": "PLU beli X gratis Y",
+    },
+    "pwp": {
+        "nama": "PWP",
+        "icon": "🛒",
+        "desc": "Promo What Purchase",
+    },
+    "suger": {
+        "nama": "Suger",
+        "icon": "🍬",
+        "desc": "PLU kategori suger",
+    },
+}
+
+
+def get_kategori_dir(kategori):
+    """Path folder untuk kategori tertentu."""
+    return os.path.join(DATA_DIR, kategori)
 
 
 # ============================================================
@@ -21,18 +51,9 @@ DATA_DIR = "data/plu_psm"
 def parse_filename(filename):
     """
     Parse nama file: '2026-10-01_15.csv' → dict info.
-    
     Format: YYYY-MM-DD_DD.csv
-    Contoh: 2026-10-01_15.csv artinya:
-        - Tahun 2026
-        - Bulan 10
-        - Tanggal mulai 01
-        - Tanggal akhir 15
     """
-    # Hapus ekstensi
     name = filename.replace(".csv", "")
-
-    # Regex: 2026-10-01_15
     match = re.match(r"(\d{4})-(\d{2})-(\d{2})_(\d{2})", name)
     if not match:
         return None
@@ -45,45 +66,50 @@ def parse_filename(filename):
         "bulan": int(bulan),
         "tgl_awal": int(tgl_awal),
         "tgl_akhir": int(tgl_akhir),
-        "periode_label": f"{tgl_awal}-{tgl_akhir} {datetime(int(tahun), int(bulan), 1).strftime('%b %Y')}",
+        "periode_label": (
+            f"{tgl_awal}-{tgl_akhir} "
+            f"{datetime(int(tahun), int(bulan), 1).strftime('%b %Y')}"
+        ),
     }
 
 
 # ============================================================
-# LIST FILE
+# LIST FILE PER KATEGORI
 # ============================================================
-def list_plu_files():
-    """List semua file CSV PLU di folder data/plu_psm/."""
-    if not os.path.exists(DATA_DIR):
+def list_plu_files(kategori):
+    """List semua file CSV PLU di folder kategori tertentu."""
+    folder = get_kategori_dir(kategori)
+
+    if not os.path.exists(folder):
         return []
 
     files = []
-    for f in os.listdir(DATA_DIR):
+    for f in os.listdir(folder):
         if f.endswith(".csv"):
             info = parse_filename(f)
             if info:
-                info["path"] = os.path.join(DATA_DIR, f)
+                info["path"] = os.path.join(folder, f)
+                info["kategori"] = kategori
                 files.append(info)
 
-    # Sort by tahun, bulan, tgl_awal
     files.sort(key=lambda x: (x["tahun"], x["bulan"], x["tgl_awal"]))
     return files
+
+
+def list_all_files():
+    """List semua file di semua kategori."""
+    result = {}
+    for kat in KATEGORI.keys():
+        result[kat] = list_plu_files(kat)
+    return result
 
 
 # ============================================================
 # FIND FILE BY DATE
 # ============================================================
-def find_file_by_date(tgl):
-    """
-    Cari file PLU yang cocok dengan tanggal.
-    
-    Args:
-        tgl: datetime.date object
-    
-    Returns:
-        dict info file, atau None kalau gak ada.
-    """
-    files = list_plu_files()
+def find_file_by_date(kategori, tgl):
+    """Cari file PLU untuk kategori & tanggal tertentu."""
+    files = list_plu_files(kategori)
 
     for f in files:
         if (f["tahun"] == tgl.year
@@ -99,7 +125,9 @@ def find_file_by_date(tgl):
 # ============================================================
 def load_plu_from_file(filepath):
     """
-    Baca file CSV PLU. Return list of dict {plu, nama, mekanisme, brand}.
+    Baca file CSV PLU. Return list of dict.
+    Kolom wajib: PLU
+    Kolom optional: Desc, Mekanisme, Brand, Kat, Qty, dll.
     """
     if not os.path.exists(filepath):
         return []
@@ -127,33 +155,38 @@ def load_plu_from_file(filepath):
         except (ValueError, TypeError):
             continue
 
-        # Ambil info tambahan kalau ada
-        nama = ""
-        mekanisme = ""
-        brand = ""
+        # Ambil info tambahan
+        info = {"plu": plu_val}
 
         for col in df.columns:
             col_lower = col.strip().lower()
             if col_lower in ["desc", "description", "nama"]:
-                nama = str(row[col]) if pd.notna(row[col]) else ""
-            elif col_lower in ["mekanisme", "mekanisme"]:
-                mekanisme = str(row[col]) if pd.notna(row[col]) else ""
+                info["nama"] = str(row[col]) if pd.notna(row[col]) else ""
+            elif col_lower == "mekanisme":
+                info["mekanisme"] = str(row[col]) if pd.notna(row[col]) else ""
             elif col_lower in ["brand", "merek"]:
-                brand = str(row[col]) if pd.notna(row[col]) else ""
+                info["brand"] = str(row[col]) if pd.notna(row[col]) else ""
+            elif col_lower == "kat":
+                info["kat"] = str(row[col]) if pd.notna(row[col]) else ""
+            elif col_lower in ["qty", "quantity", "syarat_qty"]:
+                try:
+                    info["qty"] = int(float(row[col]))
+                except (ValueError, TypeError):
+                    info["qty"] = None
+            elif col_lower in ["beli_qty", "beli"]:
+                try:
+                    info["beli_qty"] = int(float(row[col]))
+                except (ValueError, TypeError):
+                    info["beli_qty"] = None
 
-        result.append({
-            "plu": plu_val,
-            "nama": nama,
-            "mekanisme": mekanisme,
-            "brand": brand,
-        })
+        result.append(info)
 
     return result
 
 
-def load_plu_by_date(tgl):
-    """Load PLU untuk tanggal tertentu."""
-    file_info = find_file_by_date(tgl)
+def load_plu_by_date(kategori, tgl):
+    """Load PLU untuk kategori & tanggal tertentu."""
+    file_info = find_file_by_date(kategori, tgl)
 
     if file_info is None:
         return [], None
@@ -165,13 +198,10 @@ def load_plu_by_date(tgl):
 # ============================================================
 # SAVE FILE
 # ============================================================
-def save_plu_csv(uploaded_file, tahun, bulan, tgl_awal, tgl_akhir):
-    """
-    Simpan file CSV yang diupload.
-    Return: (success, message, filepath)
-    """
-    # Bikin folder
-    os.makedirs(DATA_DIR, exist_ok=True)
+def save_plu_csv(uploaded_file, kategori, tahun, bulan, tgl_awal, tgl_akhir):
+    """Simpan file CSV yang diupload ke kategori tertentu."""
+    folder = get_kategori_dir(kategori)
+    os.makedirs(folder, exist_ok=True)
 
     # Validasi
     try:
@@ -191,7 +221,7 @@ def save_plu_csv(uploaded_file, tahun, bulan, tgl_awal, tgl_akhir):
 
     # Nama file
     filename = f"{tahun}-{bulan:02d}-{tgl_awal:02d}_{tgl_akhir:02d}.csv"
-    filepath = os.path.join(DATA_DIR, filename)
+    filepath = os.path.join(folder, filename)
 
     # Simpan
     df.to_csv(filepath, index=False)
@@ -199,10 +229,28 @@ def save_plu_csv(uploaded_file, tahun, bulan, tgl_awal, tgl_akhir):
     return True, f"File disimpan: {filename} ({len(df)} PLU)", filepath
 
 
-def delete_plu_file(filename):
+def delete_plu_file(kategori, filename):
     """Hapus file PLU."""
-    filepath = os.path.join(DATA_DIR, filename)
+    filepath = os.path.join(get_kategori_dir(kategori), filename)
     if os.path.exists(filepath):
         os.remove(filepath)
         return True
     return False
+
+
+# ============================================================
+# STATISTIK
+# ============================================================
+def get_stats():
+    """Statistik file per kategori."""
+    stats = {}
+    for kat, info in KATEGORI.items():
+        files = list_plu_files(kat)
+        total_plu = sum(len(load_plu_from_file(f["path"])) for f in files)
+        stats[kat] = {
+            "nama": info["nama"],
+            "icon": info["icon"],
+            "jumlah_file": len(files),
+            "total_plu": total_plu,
+        }
+    return stats
