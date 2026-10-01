@@ -1,0 +1,29 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual env
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit temp
+temp_dashboard_db/
+pages_backup/
+migrate_log.txt
+
+# Environment
+.env
+
+# Uploads
+static/uploads/
