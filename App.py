@@ -889,3 +889,10 @@ elif st.session_state.current_page == "idea_box":
 # ============================================================
 st.markdown("---")
 st.caption("Pustaka Struk v2.0 — Untuk orang beramin")
+
+# Tombol kembali ke menu utama
+st.markdown("---")
+col_back1, col_back2, col_back3 = st.columns([1, 1, 1])
+with col_back2:
+    if st.button("🏠 Kembali ke Menu Utama", use_container_width=True, key="back_to_menu_xxx"):
+        st.switch_page("App.py")
