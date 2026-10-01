@@ -5,18 +5,10 @@ import shutil
 from utils.common import extract_zip_and_find_db
 from utils.common import load_tables
 from utils.common import build_kasir_dict_from_receipt
-from utils.anonim import setup_anonim_page, hide_only
+from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
 
-# ============================================================
-# 🔒 SETUP ANONIM (WAJIB PALING ATAS)
-# ============================================================
-# Opsi 1: Full setup (set_page_config + CSS anti-jejak)
 setup_anonim_page("Dashboard POS", "📊")
-
-# Catatan: Kalau kamu mau pakai set_page_config sendiri, pakai:
-#   st.set_page_config(...)
-#   hide_only()
-# Tapi karena pakai setup_anonim_page(), gak perlu set_page_config lagi.
+apply_nav_style()
 
 # ============================================================
 # HEADER CUSTOM
@@ -564,8 +556,9 @@ else:
 
 
 # ============================================================
-# NAVIGASI CUSTOM (GANTI SIDEBAR)
+# NAVIGASI CUSTOM
 # ============================================================
+render_nav_universal("dashboard")
 st.markdown("---")
 st.markdown("### 📌 Halaman Lain")
 st.caption("Tap tombol di bawah buat pindah halaman")
@@ -614,3 +607,4 @@ with st.expander("🔍 Debug"):
     st.write("Kolom tx_tsale: ", df_sale.columns.tolist())
     st.write("Kolom tx_tsale_card: ", df_card.columns.tolist() if not df_card.empty else "kosong")
     st.write("Kolom tx_trans_non_commerce: ", df_noncommerce.columns.tolist() if not df_noncommerce.empty else "kosong")
+    
