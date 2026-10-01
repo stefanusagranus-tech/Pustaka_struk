@@ -36,7 +36,7 @@ db_file = st.session_state.get("db_path", None)
 
 if not db_file:
     st.warning("Belum ada database. Buka halaman Home dulu untuk upload ZIP.")
-    st.stop()
+    st.save("psm")
 
 st.success("Database: " + st.session_state.get("db_name", ""))
 
@@ -92,7 +92,7 @@ try:
 
     if best_count == 0:
         st.warning("Tidak ada PLU PSM yang match. Cek debug di atas.")
-        st.stop()
+        st.save("psm")
 
     for c in ["qty", "price", "disc", "promo_disc"]:
         if c in df_psm_detail.columns:
@@ -265,3 +265,4 @@ except Exception as e:
     st.exception(e)
     
 render_nav_universal("psm")
+render_back_to_dashboard("psm")
