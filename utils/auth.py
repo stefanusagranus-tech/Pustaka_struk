@@ -70,9 +70,9 @@ def render_login_screen():
     with col2:
         st.markdown("""
         <div style="text-align: center; padding: 40px 0 20px 0;">
-            <h1 style="font-size: 3rem; margin: 0;">🏠</h1>
-            <h2 style="margin: 10px 0 5px 0;">Pustaka Struk</h2>
-            <p style="color: #888; margin: 0;">Dashboard POS Alfamart</p>
+            <h1 style="font-size: 3rem; margin: 0;">🎶</h1>
+            <h2 style="margin: 10px 0 5px 0;">Album Lagu</h2>
+            <p style="color: #888; margin: 0;">AKU YORUSHIKA. KAMU YORUSHIKA?</p>
         </div>
         """, unsafe_allow_html=True)
 
