@@ -1,579 +1,409 @@
+
+"""
+App.py — Main app dengan login + menu pilih.
+"""
 import streamlit as st
 import pandas as pd
 import os
 import shutil
-from utils.common import extract_zip_and_find_db
-from utils.common import load_tables
-from utils.common import build_kasir_dict_from_receipt
-from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
-
-# ============================================================
-# 🔒 SETUP ANONIM
-# ============================================================
-setup_anonim_page("Dashboard POS", "📊")
-apply_nav_style()
-
-# ============================================================
-# HEADER
-# ============================================================
-st.title("📊 Dashboard POS")
-st.markdown("Upload database, lalu lihat ringkasan performa toko di bawah.")
-
-# ============================================================
-# UPLOAD DATABASE
-# ============================================================
-st.subheader("📁 Upload Database")
-
-uploaded_zip = st.file_uploader(
-    "Upload file ZIP database",
-    type=["zip"],
-    key="main_zip_uploader",
+from utils.common import (
+    extract_zip_and_find_db,
+    load_tables,
+    build_kasir_dict_from_receipt,
+)
+from utils.anonim import setup_anonim_page, hide_only
+from utils.auth import (
+    init_auth_state,
+    render_login_screen,
+    render_menu_screen,
+    render_back_to_menu_button,
+    logout,
+    back_to_menu,
 )
 
-extract_path = "temp_dashboard_db"
+# ============================================================
+# SETUP HALAMAN
+# ============================================================
+setup_anonim_page("Pustaka Struk", "🏠")
 
-if uploaded_zip is not None:
-    with st.spinner("Mengekstrak & mencari database..."):
-        db_path = extract_zip_and_find_db(uploaded_zip, extract_path)
-    if db_path:
-        st.session_state["db_path"] = db_path
-        st.session_state["db_name"] = os.path.basename(db_path)
-        st.success("Database berhasil dibaca: " + os.path.basename(db_path))
-    else:
-        st.error("Tidak ada file .db di dalam ZIP.")
+# ============================================================
+# INIT AUTH
+# ============================================================
+init_auth_state()
 
-if "db_path" in st.session_state:
-    st.info("Database aktif: " + st.session_state["db_name"])
-    if st.button("Hapus database (reset)"):
-        st.session_state.pop("db_path", None)
-        st.session_state.pop("db_name", None)
-        if os.path.exists(extract_path):
-            shutil.rmtree(extract_path, ignore_errors=True)
-        st.rerun()
-else:
-    st.warning("Belum ada database. Upload ZIP dulu di atas.")
+
+# ============================================================
+# ROUTING
+# ============================================================
+
+# === 1. Belum login → tampilkan login ===
+if not st.session_state.logged_in:
+    render_login_screen()
     st.stop()
+
+# === 2. Sudah login, belum pilih → tampilkan menu ===
+if st.session_state.current_page is None:
+    render_menu_screen()
+    st.stop()
+
+# === 3. Sudah pilih → render halaman ===
+
+# --- Top bar ---
+col1, col2, col3 = st.columns([3, 1, 1])
+with col1:
+    page_name = "📊 Dashboard" if st.session_state.current_page == "dashboard" else "💡 Idea Box"
+    st.markdown(f"### {page_name}")
+with col2:
+    if st.button("⬅️ Menu", use_container_width=True, key="top_back"):
+        back_to_menu()
+with col3:
+    if st.button("🚪 Logout", use_container_width=True, key="top_logout"):
+        logout()
 
 st.markdown("---")
 
 
 # ============================================================
-# LOAD TABEL
+# HALAMAN: DASHBOARD
 # ============================================================
-@st.cache_data(show_spinner=False)
-def get_data(db_path):
-    tables = [
-        "tx_tsale",
-        "tx_tsale_card",
-        "tx_trans",
-        "log_receipt_prn",
-        "tx_trans_non_commerce",
+if st.session_state.current_page == "dashboard":
+
+    # ============================================================
+    # UPLOAD DATABASE
+    # ============================================================
+    st.subheader("📁 Upload Database")
+
+    uploaded_zip = st.file_uploader(
+        "Upload file ZIP database",
+        type=["zip"],
+        key="main_zip_uploader",
+    )
+
+    extract_path = "temp_dashboard_db"
+
+    if uploaded_zip is not None:
+        with st.spinner("Mengekstrak & mencari database..."):
+            db_path = extract_zip_and_find_db(uploaded_zip, extract_path)
+        if db_path:
+            st.session_state["db_path"] = db_path
+            st.session_state["db_name"] = os.path.basename(db_path)
+            st.success("Database berhasil dibaca: " + os.path.basename(db_path))
+        else:
+            st.error("Tidak ada file .db di dalam ZIP.")
+
+    if "db_path" in st.session_state:
+        st.info("Database aktif: " + st.session_state["db_name"])
+        if st.button("Hapus database (reset)"):
+            st.session_state.pop("db_path", None)
+            st.session_state.pop("db_name", None)
+            if os.path.exists(extract_path):
+                shutil.rmtree(extract_path, ignore_errors=True)
+            st.rerun()
+    else:
+        st.warning("Belum ada database. Upload ZIP dulu di atas.")
+        st.stop()
+
+    st.markdown("---")
+
+    # ============================================================
+    # LOAD TABEL
+    # ============================================================
+    @st.cache_data(show_spinner=False)
+    def get_data(db_path):
+        tables = [
+            "tx_tsale", "tx_tsale_card", "tx_trans",
+            "log_receipt_prn", "tx_trans_non_commerce",
+        ]
+        return load_tables(db_path, tables)
+
+    try:
+        dfs = get_data(st.session_state["db_path"])
+        df_sale = dfs.get("tx_tsale", pd.DataFrame())
+        df_card = dfs.get("tx_tsale_card", pd.DataFrame())
+        df_receipt = dfs.get("log_receipt_prn", pd.DataFrame())
+        df_noncommerce = dfs.get("tx_trans_non_commerce", pd.DataFrame())
+    except Exception as e:
+        st.error("Gagal load database: " + str(e))
+        st.stop()
+
+    if df_sale.empty:
+        st.error("Tabel tx_tsale kosong atau tidak ditemukan.")
+        st.stop()
+
+    kasir_dict = build_kasir_dict_from_receipt(df_receipt)
+
+    # ============================================================
+    # PREPARE DATA
+    # ============================================================
+    df_sale["date_tx"] = pd.to_datetime(df_sale["date_tx"], errors="coerce")
+
+    num_cols = [
+        "total_faktur", "cash", "card", "discount", "promo_disc",
+        "charity", "cash_out", "wallet", "ol_payment", "voucher",
+        "total_item",
     ]
-    dfs = load_tables(db_path, tables)
-    return dfs
+    for c in num_cols:
+        if c in df_sale.columns:
+            df_sale[c] = pd.to_numeric(df_sale[c], errors="coerce").fillna(0)
 
+    if not df_noncommerce.empty:
+        if "date_tx" in df_noncommerce.columns:
+            df_noncommerce["date_tx"] = pd.to_datetime(
+                df_noncommerce["date_tx"], errors="coerce"
+            )
+        for c in ["price", "qty", "disc"]:
+            if c in df_noncommerce.columns:
+                df_noncommerce[c] = pd.to_numeric(
+                    df_noncommerce[c], errors="coerce"
+                ).fillna(0)
 
-try:
-    dfs = get_data(st.session_state["db_path"])
-    df_sale = dfs.get("tx_tsale", pd.DataFrame())
-    df_card = dfs.get("tx_tsale_card", pd.DataFrame())
-    df_receipt = dfs.get("log_receipt_prn", pd.DataFrame())
-    df_noncommerce = dfs.get("tx_trans_non_commerce", pd.DataFrame())
-except Exception as e:
-    st.error("Gagal load database: " + str(e))
-    st.stop()
-
-if df_sale.empty:
-    st.error("Tabel tx_tsale kosong atau tidak ditemukan.")
-    st.stop()
-
-kasir_dict = build_kasir_dict_from_receipt(df_receipt)
-
-# ============================================================
-# PREPARE DATA
-# ============================================================
-df_sale["date_tx"] = pd.to_datetime(df_sale["date_tx"], errors="coerce")
-
-num_cols = [
-    "total_faktur", "cash", "card", "discount", "promo_disc",
-    "charity", "cash_out", "wallet", "ol_payment", "voucher",
-    "total_item",
-]
-for c in num_cols:
-    if c in df_sale.columns:
-        df_sale[c] = pd.to_numeric(df_sale[c], errors="coerce").fillna(0)
-
-if "cust_id" in df_sale.columns:
-    df_sale["cust_id_str"] = df_sale["cust_id"].astype(str).str.strip()
-
-if not df_noncommerce.empty:
-    if "date_tx" in df_noncommerce.columns:
-        df_noncommerce["date_tx"] = pd.to_datetime(
-            df_noncommerce["date_tx"], errors="coerce"
-        )
-    for c in ["price", "qty", "disc"]:
-        if c in df_noncommerce.columns:
-            df_noncommerce[c] = pd.to_numeric(
-                df_noncommerce[c], errors="coerce"
-            ).fillna(0)
-
-    df_noncommerce["total_bayar"] = (
-        df_noncommerce["price"] * df_noncommerce["qty"]
-    )
-    if "disc" in df_noncommerce.columns:
         df_noncommerce["total_bayar"] = (
-            df_noncommerce["total_bayar"] - df_noncommerce["disc"]
+            df_noncommerce["price"] * df_noncommerce["qty"]
         )
+        if "disc" in df_noncommerce.columns:
+            df_noncommerce["total_bayar"] -= df_noncommerce["disc"]
 
-# ============================================================
-# FILTER TANGGAL
-# ============================================================
-st.subheader("📅 Filter Tanggal")
+    # ============================================================
+    # FILTER TANGGAL
+    # ============================================================
+    st.subheader("📅 Filter Tanggal")
 
-tgl_range = ()
-if df_sale["date_tx"].notna().any():
-    min_d = df_sale["date_tx"].min().date()
-    max_d = df_sale["date_tx"].max().date()
-    tgl_range = st.date_input(
-        "Rentang Tanggal",
-        value=(min_d, max_d),
-        min_value=min_d,
-        max_value=max_d,
-        key="dash_tgl",
-    )
-    if len(tgl_range) == 2:
-        mask = (
-            df_sale["date_tx"].dt.date >= tgl_range[0]
-        ) & (df_sale["date_tx"].dt.date <= tgl_range[1])
-        df = df_sale[mask].copy()
-
-        if not df_noncommerce.empty and "date_tx" in df_noncommerce.columns:
-            df_noncommerce = df_noncommerce[
-                (df_noncommerce["date_tx"].dt.date >= tgl_range[0])
-                & (df_noncommerce["date_tx"].dt.date <= tgl_range[1])
-            ]
-    else:
-        df = df_sale.copy()
-else:
-    df = df_sale.copy()
-
-st.caption("Menampilkan " + str(len(df)) + " transaksi.")
-
-
-# ============================================================
-# FUNGSI HITUNG CASH KLERK
-# ============================================================
-def hitung_cash_klerk(df_sub):
-    def safe_sum(col):
-        if col in df_sub.columns:
-            return pd.to_numeric(df_sub[col], errors="coerce").fillna(0).sum()
-        return 0.0
-
-    return float(
-        safe_sum("total_faktur")
-        + safe_sum("charity")
-        - safe_sum("discount")
-        - safe_sum("card")
-        - safe_sum("cash_out")
-        - safe_sum("wallet")
-        - safe_sum("ol_payment")
-        - safe_sum("voucher")
-    )
-
-
-# ============================================================
-# HITUNG NON-COMMERCE
-# ============================================================
-if not df_noncommerce.empty:
-    total_noncommerce = df_noncommerce["total_bayar"].sum()
-    total_trx_noncommerce = df_noncommerce["bill_no"].nunique()
-else:
-    total_noncommerce = 0
-    total_trx_noncommerce = 0
-
-noncommerce_per_kasir = {}
-if not df_noncommerce.empty and "user_id" in df_noncommerce.columns:
-    nc_group = (
-        df_noncommerce.groupby("user_id")
-        .agg(
-            Total_NC=("total_bayar", "sum"),
-            Jumlah_NC=("bill_no", "nunique"),
-        )
-        .reset_index()
-    )
-    for _, r in nc_group.iterrows():
-        noncommerce_per_kasir[str(r["user_id"])] = {
-            "total": r["Total_NC"],
-            "jumlah": r["Jumlah_NC"],
-        }
-
-# ⬇️⬇️⬇️ LANJUT KE BAGIAN 2 ⬇️⬇️⬇️
-# ============================================================
-# KPI UTAMA
-# ============================================================
-st.markdown("---")
-st.subheader("💰 Ringkasan Performa")
-
-total_omzet = df["total_faktur"].sum()
-total_struk = df["faktur"].nunique()
-total_cash_klerk = hitung_cash_klerk(df)
-
-total_omzet_reguler = total_omzet - total_noncommerce
-total_struk_reguler = total_struk - total_trx_noncommerce
-
-total_debit = 0
-if not df_card.empty and "amount" in df_card.columns:
-    df_card_temp = df_card.copy()
-    if "date_tx" in df_card_temp.columns:
-        df_card_temp["date_tx"] = pd.to_datetime(
-            df_card_temp["date_tx"], errors="coerce"
+    tgl_range = ()
+    if df_sale["date_tx"].notna().any():
+        min_d = df_sale["date_tx"].min().date()
+        max_d = df_sale["date_tx"].max().date()
+        tgl_range = st.date_input(
+            "Rentang Tanggal",
+            value=(min_d, max_d),
+            min_value=min_d,
+            max_value=max_d,
+            key="dash_tgl",
         )
         if len(tgl_range) == 2:
-            df_card_temp = df_card_temp[
-                (df_card_temp["date_tx"].dt.date >= tgl_range[0])
-                & (df_card_temp["date_tx"].dt.date <= tgl_range[1])
-            ]
-    df_card_temp["amount"] = pd.to_numeric(
-        df_card_temp["amount"], errors="coerce"
-    ).fillna(0)
-    total_debit = df_card_temp["amount"].sum()
+            mask = (df_sale["date_tx"].dt.date >= tgl_range[0]) & (
+                df_sale["date_tx"].dt.date <= tgl_range[1]
+            )
+            df = df_sale[mask].copy()
+            if not df_noncommerce.empty and "date_tx" in df_noncommerce.columns:
+                df_noncommerce = df_noncommerce[
+                    (df_noncommerce["date_tx"].dt.date >= tgl_range[0])
+                    & (df_noncommerce["date_tx"].dt.date <= tgl_range[1])
+                ]
+        else:
+            df = df_sale.copy()
+    else:
+        df = df_sale.copy()
 
-total_ewallet = df["wallet"].sum() if "wallet" in df.columns else 0
+    st.caption("Menampilkan " + str(len(df)) + " transaksi.")
 
-if "cust_id" in df.columns:
-    df["_is_member_kpi"] = df["cust_id"].apply(
-        lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
-                  and pd.notna(x)
-    )
-    total_sales_member = df[df["_is_member_kpi"]]["total_faktur"].sum()
-else:
-    total_sales_member = 0
-
-total_item = df["total_item"].sum() if "total_item" in df.columns else 0
-
-st.markdown("##### 💰 Omzet")
-c1, c2, c3 = st.columns(3)
-c1.metric("💰 Omzet Reguler", "Rp " + format(total_omzet_reguler, ",.0f"))
-c2.metric("📱 Omzet Non-Commerce", "Rp " + format(total_noncommerce, ",.0f"))
-c3.metric("📊 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
-
-st.markdown("##### 🧾 Transaksi")
-c4, c5, c6 = st.columns(3)
-c4.metric("🧾 Total Struk Reguler", format(int(total_struk_reguler), ","))
-c5.metric("📱 Struk Non-Commerce", format(int(total_trx_noncommerce), ","))
-c6.metric("📦 Total Item", format(int(total_item), ","))
-
-st.markdown("##### 💳 Pembayaran")
-c7, c8, c9, c10 = st.columns(4)
-c7.metric("💵 Cash Klerk", "Rp " + format(total_cash_klerk, ",.0f"))
-c8.metric("💳 Total Debit", "Rp " + format(total_debit, ",.0f"))
-c9.metric("📱 Total E-Wallet", "Rp " + format(total_ewallet, ",.0f"))
-c10.metric("👥 Sales Member", "Rp " + format(total_sales_member, ",.0f"))
-
-
-# ============================================================
-# GRAFIK JAM RAMAI
-# ============================================================
-st.markdown("---")
-st.subheader("🕐 Jam Ramai Transaksi")
-
-if "time_tx" in df.columns and df["time_tx"].notna().any():
-    df_time = df.copy()
-
-    def get_hour(t):
-        try:
-            s = str(t).strip()
-            if ":" in s:
-                return int(s.split(":")[0])
-            return None
-        except Exception:
-            return None
-
-    df_time["jam"] = df_time["time_tx"].apply(get_hour)
-    df_time = df_time.dropna(subset=["jam"])
-    df_time["jam"] = df_time["jam"].astype(int)
-
-    if not df_time.empty:
-        per_jam = (
-            df_time.groupby("jam")["faktur"]
-            .nunique()
-            .reset_index()
-            .rename(columns={"faktur": "Jumlah_Transaksi"})
+    # ============================================================
+    # FUNGSI HITUNG CASH KLERK
+    # ============================================================
+    def hitung_cash_klerk(df_sub):
+        def safe_sum(col):
+            if col in df_sub.columns:
+                return pd.to_numeric(df_sub[col], errors="coerce").fillna(0).sum()
+            return 0.0
+        return float(
+            safe_sum("total_faktur") + safe_sum("charity")
+            - safe_sum("discount") - safe_sum("card")
+            - safe_sum("cash_out") - safe_sum("wallet")
+            - safe_sum("ol_payment") - safe_sum("voucher")
         )
 
-        all_hours = pd.DataFrame({"jam": range(24)})
-        per_jam = all_hours.merge(per_jam, on="jam", how="left").fillna(0)
-        per_jam["Jumlah_Transaksi"] = per_jam["Jumlah_Transaksi"].astype(int)
+    # ============================================================
+    # HITUNG NON-COMMERCE
+    # ============================================================
+    if not df_noncommerce.empty:
+        total_noncommerce = df_noncommerce["total_bayar"].sum()
+        total_trx_noncommerce = df_noncommerce["bill_no"].nunique()
+    else:
+        total_noncommerce = 0
+        total_trx_noncommerce = 0
 
-        chart_data = per_jam.set_index("jam")["Jumlah_Transaksi"]
-        st.bar_chart(chart_data, use_container_width=True)
+    noncommerce_per_kasir = {}
+    if not df_noncommerce.empty and "user_id" in df_noncommerce.columns:
+        nc_group = (
+            df_noncommerce.groupby("user_id")
+            .agg(Total_NC=("total_bayar", "sum"), Jumlah_NC=("bill_no", "nunique"))
+            .reset_index()
+        )
+        for _, r in nc_group.iterrows():
+            noncommerce_per_kasir[str(r["user_id"])] = {
+                "total": r["Total_NC"],
+                "jumlah": r["Jumlah_NC"],
+            }
 
-        per_jam_aktif = per_jam[per_jam["Jumlah_Transaksi"] > 0]
+    # ============================================================
+    # KPI UTAMA
+    # ============================================================
+    st.markdown("---")
+    st.subheader("💰 Ringkasan Performa")
 
-        if not per_jam_aktif.empty:
-            jam_teramai = per_jam_aktif.loc[
-                per_jam_aktif["Jumlah_Transaksi"].idxmax()
-            ]
-            jam_tersepi = per_jam_aktif.loc[
-                per_jam_aktif["Jumlah_Transaksi"].idxmin()
-            ]
+    total_omzet = df["total_faktur"].sum()
+    total_struk = df["faktur"].nunique()
+    total_cash_klerk = hitung_cash_klerk(df)
 
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.success(
-                    "🔥 Jam Teramai: "
-                    + str(int(jam_teramai["jam"])).zfill(2) + ":00"
-                    + " — "
-                    + str(int(jam_teramai["Jumlah_Transaksi"]))
-                    + " transaksi"
-                )
-            with col_b:
-                st.warning(
-                    "❄️ Jam Tersepi: "
-                    + str(int(jam_tersepi["jam"])).zfill(2) + ":00"
-                    + " — "
-                    + str(int(jam_tersepi["Jumlah_Transaksi"]))
-                    + " transaksi"
-                )
+    total_omzet_reguler = total_omzet - total_noncommerce
+    total_struk_reguler = total_struk - total_trx_noncommerce
 
-            with st.expander("📋 Lihat Distribusi per Jam"):
-                per_jam_display = per_jam.copy()
-                per_jam_display["Jam"] = per_jam_display["jam"].apply(
-                    lambda x: str(x).zfill(2) + ":00"
-                )
-                per_jam_display = per_jam_display[["Jam", "Jumlah_Transaksi"]]
-                st.dataframe(per_jam_display, use_container_width=True, hide_index=True)
+    total_debit = 0
+    if not df_card.empty and "amount" in df_card.columns:
+        df_card_temp = df_card.copy()
+        if "date_tx" in df_card_temp.columns:
+            df_card_temp["date_tx"] = pd.to_datetime(
+                df_card_temp["date_tx"], errors="coerce"
+            )
+            if len(tgl_range) == 2:
+                df_card_temp = df_card_temp[
+                    (df_card_temp["date_tx"].dt.date >= tgl_range[0])
+                    & (df_card_temp["date_tx"].dt.date <= tgl_range[1])
+                ]
+        df_card_temp["amount"] = pd.to_numeric(
+            df_card_temp["amount"], errors="coerce"
+        ).fillna(0)
+        total_debit = df_card_temp["amount"].sum()
+
+    total_ewallet = df["wallet"].sum() if "wallet" in df.columns else 0
+
+    if "cust_id" in df.columns:
+        df["_is_member_kpi"] = df["cust_id"].apply(
+            lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
+            and pd.notna(x)
+        )
+        total_sales_member = df[df["_is_member_kpi"]]["total_faktur"].sum()
+    else:
+        total_sales_member = 0
+
+    total_item = df["total_item"].sum() if "total_item" in df.columns else 0
+
+    st.markdown("##### 💰 Omzet")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("💰 Omzet Reguler", "Rp " + format(total_omzet_reguler, ",.0f"))
+    c2.metric("📱 Omzet Non-Commerce", "Rp " + format(total_noncommerce, ",.0f"))
+    c3.metric("📊 Total Omzet", "Rp " + format(total_omzet, ",.0f"))
+
+    st.markdown("##### 🧾 Transaksi")
+    c4, c5, c6 = st.columns(3)
+    c4.metric("🧾 Total Struk Reguler", format(int(total_struk_reguler), ","))
+    c5.metric("📱 Struk Non-Commerce", format(int(total_trx_noncommerce), ","))
+    c6.metric("📦 Total Item", format(int(total_item), ","))
+
+    st.markdown("##### 💳 Pembayaran")
+    c7, c8, c9, c10 = st.columns(4)
+    c7.metric("💵 Cash Klerk", "Rp " + format(total_cash_klerk, ",.0f"))
+    c8.metric("💳 Total Debit", "Rp " + format(total_debit, ",.0f"))
+    c9.metric("📱 Total E-Wallet", "Rp " + format(total_ewallet, ",.0f"))
+    c10.metric("👥 Sales Member", "Rp " + format(total_sales_member, ",.0f"))
+
+    # ============================================================
+    # GRAFIK JAM RAMAI
+    # ============================================================
+    st.markdown("---")
+    st.subheader("🕐 Jam Ramai Transaksi")
+
+    if "time_tx" in df.columns and df["time_tx"].notna().any():
+        df_time = df.copy()
+
+        def get_hour(t):
+            try:
+                s = str(t).strip()
+                if ":" in s:
+                    return int(s.split(":")[0])
+                return None
+            except Exception:
+                return None
+
+        df_time["jam"] = df_time["time_tx"].apply(get_hour)
+        df_time = df_time.dropna(subset=["jam"])
+        df_time["jam"] = df_time["jam"].astype(int)
+
+        if not df_time.empty:
+            per_jam = (
+                df_time.groupby("jam")["faktur"]
+                .nunique()
+                .reset_index()
+                .rename(columns={"faktur": "Jumlah_Transaksi"})
+            )
+            all_hours = pd.DataFrame({"jam": range(24)})
+            per_jam = all_hours.merge(per_jam, on="jam", how="left").fillna(0)
+            per_jam["Jumlah_Transaksi"] = per_jam["Jumlah_Transaksi"].astype(int)
+
+            chart_data = per_jam.set_index("jam")["Jumlah_Transaksi"]
+            st.bar_chart(chart_data, use_container_width=True)
         else:
             st.info("Tidak ada transaksi di rentang tanggal ini.")
     else:
-        st.info("Kolom time_tx tidak berisi data valid.")
-else:
-    st.info("Kolom time_tx tidak ditemukan di tx_tsale.")
+        st.info("Kolom time_tx tidak ditemukan.")
+
+    # ============================================================
+    # TABEL PER KASIR
+    # ============================================================
+    st.markdown("---")
+    st.subheader("👤 Rekapitulasi per Kasir")
+
+    if "user_id" in df.columns:
+        if "cust_id" in df.columns:
+            df["is_member"] = df["cust_id"].apply(
+                lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
+                and pd.notna(x)
+            )
+        else:
+            df["is_member"] = False
+
+        agg_rows = []
+        for kasir, grp in df.groupby("user_id"):
+            sales_total = grp["total_faktur"].sum()
+            nik_str = str(kasir)
+            nc_data = noncommerce_per_kasir.get(nik_str, {"total": 0, "jumlah": 0})
+            sales_nc = nc_data["total"]
+            jumlah_nc = nc_data["jumlah"]
+            sales_reguler = sales_total - sales_nc
+            std_personil = grp["faktur"].nunique()
+            std_reguler = std_personil - jumlah_nc
+            grp_member = grp[grp["is_member"] == True]
+            sales_member = grp_member["total_faktur"].sum() if not grp_member.empty else 0
+            std_member = grp_member["faktur"].nunique() if not grp_member.empty else 0
+            cash_klerk = hitung_cash_klerk(grp)
+            ewallet_kasir = grp["wallet"].sum() if "wallet" in grp.columns else 0
+            nama_kasir = kasir_dict.get(nik_str, "-")
+
+            agg_rows.append({
+                "NIK": nik_str,
+                "Nama Kasir": nama_kasir,
+                "Sales Reguler": sales_reguler,
+                "Sales Non-Commerce": sales_nc,
+                "STD Reguler": int(std_reguler),
+                "Sales Member": sales_member,
+                "Cash Klerk": cash_klerk,
+                "E-Wallet": ewallet_kasir,
+            })
+
+        rekap_kasir = pd.DataFrame(agg_rows).sort_values(
+            "Sales Reguler", ascending=False
+        ).reset_index(drop=True)
+
+        st.dataframe(rekap_kasir, use_container_width=True, hide_index=True)
+
+        csv = rekap_kasir.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Download Rekap Kasir (CSV)",
+            data=csv,
+            file_name="rekap_kasir.csv",
+            mime="text/csv",
+        )
 
 
 # ============================================================
-# BREAKDOWN DEBIT PER BANK
+# HALAMAN: IDEA BOX
+# ============================================================
+elif st.session_state.current_page == "idea_box":
+    st.info("💡 Halaman Idea Box — paste kode dari `pages/0b_Idea_Box.py` di sini")
+    st.markdown("Atau akses lewat menu sidebar kalau ada.")
+
+
+# ============================================================
+# FOOTER
 # ============================================================
 st.markdown("---")
-st.subheader("💳 Sales Debit per Bank")
-
-if not df_card.empty and "bank" in df_card.columns and "amount" in df_card.columns:
-    df_card_temp = df_card.copy()
-    df_card_temp["amount"] = pd.to_numeric(
-        df_card_temp["amount"], errors="coerce"
-    ).fillna(0)
-
-    if "date_tx" in df_card_temp.columns:
-        df_card_temp["date_tx"] = pd.to_datetime(
-            df_card_temp["date_tx"], errors="coerce"
-        )
-        if len(tgl_range) == 2:
-            df_card_temp = df_card_temp[
-                (df_card_temp["date_tx"].dt.date >= tgl_range[0])
-                & (df_card_temp["date_tx"].dt.date <= tgl_range[1])
-            ]
-
-    KODE_BCA = 1
-
-    def get_bank_kategori(bank_code):
-        try:
-            code = int(float(bank_code))
-            if code == KODE_BCA:
-                return "BCA"
-            return "Yokke"
-        except Exception:
-            return "Yokke"
-
-    df_card_temp["Nama_Bank"] = df_card_temp["bank"].apply(get_bank_kategori)
-
-    rekap_bank = (
-        df_card_temp.groupby("Nama_Bank")
-        .agg(
-            Jumlah_Transaksi=("faktur", "nunique"),
-            Total_Nominal=("amount", "sum"),
-        )
-        .reset_index()
-        .sort_values("Total_Nominal", ascending=False)
-    )
-
-    if not rekap_bank.empty:
-        chart_bank = rekap_bank.set_index("Nama_Bank")["Total_Nominal"]
-        st.bar_chart(chart_bank, use_container_width=True)
-
-        rekap_bank_display = rekap_bank.copy()
-        rekap_bank_display["Total_Nominal"] = rekap_bank_display["Total_Nominal"].apply(
-            lambda x: "Rp " + format(x, ",.0f")
-        )
-        st.dataframe(rekap_bank_display, use_container_width=True, hide_index=True)
-
-        total_debit_bank = df_card_temp["amount"].sum()
-        st.info(
-            "Total Debit: Rp " + format(total_debit_bank, ",.0f")
-            + " dari " + str(df_card_temp["faktur"].nunique())
-            + " transaksi"
-        )
-    else:
-        st.info("Tidak ada transaksi debit di rentang tanggal ini.")
-else:
-    st.info("Tabel tx_tsale_card tidak ditemukan atau kosong.")
-
-
-# ============================================================
-# TABEL PER KASIR
-# ============================================================
-st.markdown("---")
-st.subheader("👤 Rekapitulasi per Kasir")
-
-if "user_id" in df.columns:
-    if "cust_id" in df.columns:
-        df["is_member"] = df["cust_id"].apply(
-            lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
-                      and pd.notna(x)
-        )
-    else:
-        df["is_member"] = False
-
-    agg_rows = []
-    for kasir, grp in df.groupby("user_id"):
-        sales_total = grp["total_faktur"].sum()
-
-        nik_str = str(kasir)
-        nc_data = noncommerce_per_kasir.get(nik_str, {"total": 0, "jumlah": 0})
-        sales_nc = nc_data["total"]
-        jumlah_nc = nc_data["jumlah"]
-
-        sales_reguler = sales_total - sales_nc
-
-        std_personil = grp["faktur"].nunique()
-        std_reguler = std_personil - jumlah_nc
-
-        grp_member = grp[grp["is_member"] == True]
-        sales_member = grp_member["total_faktur"].sum() if not grp_member.empty else 0
-        std_member = grp_member["faktur"].nunique() if not grp_member.empty else 0
-
-        cash_klerk = hitung_cash_klerk(grp)
-
-        total_debit_kasir = 0
-        if not df_card.empty and "user_id" in df_card.columns:
-            df_card_k = df_card.copy()
-            df_card_k["amount"] = pd.to_numeric(
-                df_card_k["amount"], errors="coerce"
-            ).fillna(0)
-            if "date_tx" in df_card_k.columns:
-                df_card_k["date_tx"] = pd.to_datetime(
-                    df_card_k["date_tx"], errors="coerce"
-                )
-                if len(tgl_range) == 2:
-                    df_card_k = df_card_k[
-                        (df_card_k["date_tx"].dt.date >= tgl_range[0])
-                        & (df_card_k["date_tx"].dt.date <= tgl_range[1])
-                    ]
-            df_card_k = df_card_k[df_card_k["user_id"].astype(str) == nik_str]
-            total_debit_kasir = df_card_k["amount"].sum()
-
-        ewallet_kasir = grp["wallet"].sum() if "wallet" in grp.columns else 0
-
-        nama_kasir = kasir_dict.get(nik_str, "-")
-
-        agg_rows.append({
-            "NIK": nik_str,
-            "Nama_Kasir": nama_kasir,
-            "Sales_Reguler": sales_reguler,
-            "Sales_NonCommerce": sales_nc,
-            "STD_Reguler": int(std_reguler),
-            "STD_NonCommerce": int(jumlah_nc),
-            "Sales_Member": sales_member,
-            "STD_Member": int(std_member),
-            "Cash_Klerk": cash_klerk,
-            "Debit": total_debit_kasir,
-            "E_Wallet": ewallet_kasir,
-        })
-
-    rekap_kasir = pd.DataFrame(agg_rows).sort_values(
-        "Sales_Reguler", ascending=False
-    ).reset_index(drop=True)
-
-    rekap_display = rekap_kasir.copy()
-    rekap_display["Sales_Reguler"] = rekap_display["Sales_Reguler"].apply(
-        lambda x: "Rp " + format(x, ",.0f")
-    )
-    rekap_display["Sales_NonCommerce"] = rekap_display["Sales_NonCommerce"].apply(
-        lambda x: "Rp " + format(x, ",.0f")
-    )
-    rekap_display["Sales_Member"] = rekap_display["Sales_Member"].apply(
-        lambda x: "Rp " + format(x, ",.0f")
-    )
-    rekap_display["Cash_Klerk"] = rekap_display["Cash_Klerk"].apply(
-        lambda x: "Rp " + format(x, ",.0f")
-    )
-    rekap_display["Debit"] = rekap_display["Debit"].apply(
-        lambda x: "Rp " + format(x, ",.0f")
-    )
-    rekap_display["E_Wallet"] = rekap_display["E_Wallet"].apply(
-        lambda x: "Rp " + format(x, ",.0f")
-    )
-
-    rekap_display = rekap_display.rename(columns={
-        "NIK": "NIK",
-        "Nama_Kasir": "Nama Kasir",
-        "Sales_Reguler": "Sales Reguler",
-        "Sales_NonCommerce": "Sales Non-Commerce",
-        "STD_Reguler": "STD Reguler",
-        "STD_NonCommerce": "STD Non-Commerce",
-        "Sales_Member": "Sales Member",
-        "STD_Member": "STD Member",
-        "Cash_Klerk": "Cash Klerk",
-        "E_Wallet": "E-Wallet",
-    })
-
-    st.caption("Terdeteksi " + str(len(kasir_dict)) + " kasir dari log_receipt_prn.")
-    st.dataframe(rekap_display, use_container_width=True, hide_index=True)
-
-    total_row = pd.DataFrame([{
-        "NIK": "TOTAL",
-        "Nama Kasir": "-",
-        "Sales Reguler": "Rp " + format(rekap_kasir["Sales_Reguler"].sum(), ",.0f"),
-        "Sales Non-Commerce": "Rp " + format(rekap_kasir["Sales_NonCommerce"].sum(), ",.0f"),
-        "STD Reguler": int(rekap_kasir["STD_Reguler"].sum()),
-        "STD Non-Commerce": int(rekap_kasir["STD_NonCommerce"].sum()),
-        "Sales Member": "Rp " + format(rekap_kasir["Sales_Member"].sum(), ",.0f"),
-        "STD Member": int(rekap_kasir["STD_Member"].sum()),
-        "Cash Klerk": "Rp " + format(rekap_kasir["Cash_Klerk"].sum(), ",.0f"),
-        "Debit": "Rp " + format(rekap_kasir["Debit"].sum(), ",.0f"),
-        "E-Wallet": "Rp " + format(rekap_kasir["E_Wallet"].sum(), ",.0f"),
-    }])
-    st.dataframe(total_row, use_container_width=True, hide_index=True)
-
-    csv = rekap_kasir.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download Rekap Kasir (CSV)",
-        data=csv,
-        file_name="rekap_kasir.csv",
-        mime="text/csv",
-    )
-else:
-    st.info("Kolom user_id tidak ditemukan.")
-
-
-# ============================================================
-# NAVIGASI TOMBOL CUSTOM
-# ============================================================
-render_nav_universal("dashboard")
-
-
-# ============================================================
-# DEBUG (opsional)
-# ============================================================
-with st.expander("🔍 Debug"):
-    st.write("Total baris tx_tsale: " + str(len(df_sale)))
-    st.write("Total baris tx_tsale_card: " + str(len(df_card)))
-    st.write("Total baris log_receipt_prn: " + str(len(df_receipt)))
-    st.write("Total baris tx_trans_non_commerce: " + str(len(df_noncommerce)))
-    st.write("Jumlah kasir di kasir_dict: " + str(len(kasir_dict)))
-    st.write("Rentang tanggal: " + str(tgl_range))
-    st.write("Total Omzet: Rp " + format(total_omzet, ",.0f"))
-    st.write("Omzet Reguler: Rp " + format(total_omzet_reguler, ",.0f"))
-    st.write("Omzet Non-Commerce: Rp " + format(total_noncommerce, ",.0f"))
-    st.write("Kolom tx_tsale: ", df_sale.columns.tolist())
-    st.write("Kolom tx_tsale_card: ", df_card.columns.tolist() if not df_card.empty else "kosong")
-    st.write("Kolom tx_trans_non_commerce: ", df_noncommerce.columns.tolist() if not df_noncommerce.empty else "kosong")
+st.caption("Pustaka Struk v2.0 — Internal use only")
