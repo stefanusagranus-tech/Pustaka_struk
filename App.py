@@ -16,7 +16,6 @@ from utils.auth import (
     init_auth_state,
     render_login_screen,
     render_menu_screen,
-    render_back_to_menu_button,
     logout,
     back_to_menu,
 )
