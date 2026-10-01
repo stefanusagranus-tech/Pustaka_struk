@@ -11,16 +11,12 @@ from utils.common import (
     get_struk_text, build_plu_name_dict,
 )
 from utils.plu_dict import get_nama_plu, get_plu_normalized
-from utils.plu_dict import get_nama_plu, get_plu_normalized
-
 from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
 
 setup_anonim_page("1 PSM per PLU", "📊")
 apply_nav_style()
-)
 
 st.title("📦 Laporan PSM per PLU")
-st.markdown("Menampilkan PLU PSM beserta qty, sales, dan nomor bon.")
 
 PLU_PSM = {
     435191, 429397, 434880, 401632, 401633, 434281, 221623, 4504,
