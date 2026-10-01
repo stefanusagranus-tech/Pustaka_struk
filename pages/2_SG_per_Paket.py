@@ -11,12 +11,10 @@ from utils.common import (
     get_struk_text, build_plu_name_dict,
 )
 from utils.plu_dict import get_nama_plu, get_plu_normalized
-
 from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
 
 setup_anonim_page("2 SG per Paket", "🎁")
 apply_nav_style()
-)
 
 st.title("🎁 Laporan Serba Gratis (SG) per Paket")
 st.markdown("Menampilkan paket Serba Gratis yang sudah memenuhi syarat penjualan.")
