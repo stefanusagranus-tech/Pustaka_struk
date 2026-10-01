@@ -609,8 +609,19 @@ if st.session_state.current_page == "dashboard":
             st.switch_page("pages/7_Cek_Struk_Detail.py")
 
     with col_t2:
-        if st.button("❌ Void Transaksi", use_container_width=True, key="dash_nav_void"):
-            st.switch_page("pages/6_Cek_Struk_Void.py")
+    if st.button("❌ Void Transaksi", use_container_width=True, key="dash_nav_void"):
+        st.switch_page("pages/6_Cek_Struk_Void.py")
+
+    st.markdown("---")
+
+    st.markdown("### ⚙️ Pengaturan")
+    st.caption("Kelola data master")
+
+    col_m1, col_m2 = st.columns(2)
+
+    with col_m1:
+      if st.button("📋 Manage PLU", use_container_width=True, key="dash_nav_manage_plu"):
+          st.switch_page("pages/8_Manage_PLU.py")
 
 # ⬇️⬇️⬇️ LANJUT KE BAGIAN 3 ⬇️⬇️⬇️
 # ============================================================
