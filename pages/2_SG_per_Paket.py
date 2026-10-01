@@ -5,6 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from utils.nav_helper import render_back_to_dashboard, safe_stop
 from utils.common import (
     load_tables, normalize_plu_series,
     render_struk_html, generate_pdf, render_print_button,
@@ -136,7 +137,7 @@ db_file = st.session_state.get("db_path", None)
 
 if not db_file:
     st.warning("Belum ada database. Buka halaman Home dulu untuk upload ZIP.")
-    st.stop()
+    st.save("sg")
 
 st.success("Database: " + st.session_state.get("db_name", ""))
 
@@ -151,7 +152,7 @@ try:
 
     if df_detail.empty:
         st.error("Tabel tx_trans kosong.")
-        st.stop()
+        st.save("sg")
 
     # ============================================================
     # FILTER ITEM SG (dengan auto-normalisasi PLU)
@@ -472,3 +473,4 @@ except Exception as e:
     st.exception(e)
     
 render_nav_universal("sg")
+render_back_to_dashboard("sg")
