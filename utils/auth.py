@@ -141,7 +141,7 @@ def render_login_screen():
 # MENU SCREEN
 # ============================================================
 def render_menu_screen():
-    """Tampilkan menu pilih Dashboard / Idea Box."""
+    """Tampilkan menu pilih Dashboard / Idea Box / Manage PLU."""
 
     st.markdown("""
     <div style="text-align: center; padding: 20px 0;">
@@ -152,7 +152,10 @@ def render_menu_screen():
 
     st.markdown("---")
 
-    col1, col2 = st.columns(2)
+    # ============================================================
+    # 3 MENU UTAMA (Dashboard, Idea Box, Manage PLU)
+    # ============================================================
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         with st.container(border=True):
@@ -172,7 +175,7 @@ def render_menu_screen():
             - 📊 Halaman analisis
             """)
 
-            if st.button("📊 MASUK DASHBOARD →", use_container_width=True, type="primary", key="btn_dash"):
+            if st.button("📊 MASUK →", use_container_width=True, type="primary", key="btn_dash"):
                 st.session_state.current_page = "dashboard"
                 st.rerun()
 
@@ -194,17 +197,42 @@ def render_menu_screen():
             - 🗑️ Arsip ide
             """)
 
-            if st.button("💡 MASUK IDEA BOX →", use_container_width=True, type="primary", key="btn_idea"):
+            if st.button("💡 MASUK →", use_container_width=True, type="primary", key="btn_idea"):
                 st.session_state.current_page = "idea_box"
                 st.rerun()
 
+    with col3:
+        with st.container(border=True):
+            st.markdown("""
+            <div style="text-align: center; padding: 20px 0;">
+                <div style="font-size: 4rem;">📋</div>
+                <h2>Manage PLU</h2>
+                <p style="color: #888;">Kelola PLU master</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("**Fitur:**")
+            st.markdown("""
+            - 📤 Upload PLU CSV
+            - 📅 Atur periode
+            - 🗂️ 4 kategori (PSM/SG/PWP/Suger)
+            - 🔍 Preview per tanggal
+            """)
+
+            if st.button("📋 MASUK →", use_container_width=True, type="primary", key="btn_manage"):
+                st.session_state.current_page = "manage_plu"
+                st.rerun()
+
+    # ============================================================
+    # LOGOUT
+    # ============================================================
     st.markdown("---")
 
     col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
     with col_l2:
         if st.button("🚪 Logout", use_container_width=True):
             logout()
-
+            
 # ⬇️⬇️⬇️ LANJUT KE BAGIAN 2 ⬇️⬇️⬇️
 
 # ============================================================
