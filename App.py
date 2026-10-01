@@ -7,11 +7,14 @@ from utils.common import load_tables
 from utils.common import build_kasir_dict_from_receipt
 from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
 
+# ============================================================
+# 🔒 SETUP ANONIM
+# ============================================================
 setup_anonim_page("Dashboard POS", "📊")
 apply_nav_style()
 
 # ============================================================
-# HEADER CUSTOM
+# HEADER
 # ============================================================
 st.title("📊 Dashboard POS")
 st.markdown("Upload database, lalu lihat ringkasan performa toko di bawah.")
@@ -84,7 +87,6 @@ if df_sale.empty:
     st.error("Tabel tx_tsale kosong atau tidak ditemukan.")
     st.stop()
 
-# Bangun dictionary NIK -> Nama Kasir dari log_receipt_prn
 kasir_dict = build_kasir_dict_from_receipt(df_receipt)
 
 # ============================================================
@@ -104,7 +106,6 @@ for c in num_cols:
 if "cust_id" in df_sale.columns:
     df_sale["cust_id_str"] = df_sale["cust_id"].astype(str).str.strip()
 
-# Prepare non-commerce
 if not df_noncommerce.empty:
     if "date_tx" in df_noncommerce.columns:
         df_noncommerce["date_tx"] = pd.to_datetime(
@@ -250,7 +251,6 @@ else:
 
 total_item = df["total_item"].sum() if "total_item" in df.columns else 0
 
-
 st.markdown("##### 💰 Omzet")
 c1, c2, c3 = st.columns(3)
 c1.metric("💰 Omzet Reguler", "Rp " + format(total_omzet_reguler, ",.0f"))
@@ -352,7 +352,7 @@ else:
 
 
 # ============================================================
-# BREAKDOWN DEBIT PER BANK (BCA & YOKKE)
+# BREAKDOWN DEBIT PER BANK
 # ============================================================
 st.markdown("---")
 st.subheader("💳 Sales Debit per Bank")
@@ -556,42 +556,13 @@ else:
 
 
 # ============================================================
-# NAVIGASI CUSTOM
+# NAVIGASI TOMBOL CUSTOM
 # ============================================================
 render_nav_universal("dashboard")
-st.markdown("---")
-st.markdown("### 📌 Halaman Lain")
-st.caption("Tap tombol di bawah buat pindah halaman")
-
-# Baris 1: halaman utama
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("📊 1 PSM per PLU", use_container_width=True, key="nav_psm"):
-        st.switch_page("pages/1_PSM_per_PLU.py")
-
-with col2:
-    if st.button("🎁 2 SG per Paket", use_container_width=True, key="nav_sg"):
-        st.switch_page("pages/2_SG_per_Paket.py")
-
-# Baris 2
-col3, col4 = st.columns(2)
-
-with col3:
-    if st.button("📦 3 Topup Flaz", use_container_width=True, key="nav_topup"):
-        st.switch_page("pages/5_Topup_Flaz.py")
-
-with col4:
-    if st.button("🧾 4 Cek Struk", use_container_width=True, key="nav_struk"):
-        st.switch_page("pages/3_struk_Suger.py")
-
-# Baris 3: full width
-if st.button("❌ 5 Void Transaksi", use_container_width=True, key="nav_void"):
-    st.switch_page("pages/6_Cek_Struk_Void.py")
 
 
 # ============================================================
-# DEBUG (opsional, bisa dihapus kalau udah stabil)
+# DEBUG (opsional)
 # ============================================================
 with st.expander("🔍 Debug"):
     st.write("Total baris tx_tsale: " + str(len(df_sale)))
@@ -599,7 +570,6 @@ with st.expander("🔍 Debug"):
     st.write("Total baris log_receipt_prn: " + str(len(df_receipt)))
     st.write("Total baris tx_trans_non_commerce: " + str(len(df_noncommerce)))
     st.write("Jumlah kasir di kasir_dict: " + str(len(kasir_dict)))
-    st.write("Contoh kasir_dict: ", dict(list(kasir_dict.items())[:5]))
     st.write("Rentang tanggal: " + str(tgl_range))
     st.write("Total Omzet: Rp " + format(total_omzet, ",.0f"))
     st.write("Omzet Reguler: Rp " + format(total_omzet_reguler, ",.0f"))
@@ -607,4 +577,3 @@ with st.expander("🔍 Debug"):
     st.write("Kolom tx_tsale: ", df_sale.columns.tolist())
     st.write("Kolom tx_tsale_card: ", df_card.columns.tolist() if not df_card.empty else "kosong")
     st.write("Kolom tx_trans_non_commerce: ", df_noncommerce.columns.tolist() if not df_noncommerce.empty else "kosong")
-    
