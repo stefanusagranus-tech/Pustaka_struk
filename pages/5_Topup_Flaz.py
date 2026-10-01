@@ -6,11 +6,10 @@ import pandas as pd
 import streamlit as st
 from utils.common import load_tables
 
-st.set_page_config(
-    page_title="Topup Flaz",
-    page_icon="📱",
-    layout="wide",
-)
+from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
+
+setup_anonim_page("Topup Flaz", "📦")
+apply_nav_style()
 
 st.title("📱 Laporan Topup Flaz")
 st.markdown("Menampilkan semua transaksi topup Flaz dari tabel `tx_trans_non_commerce`.")
@@ -208,3 +207,5 @@ try:
 except Exception as e:
     st.error("Error: " + str(e))
     st.exception(e)
+
+render_nav_universal("topup")
