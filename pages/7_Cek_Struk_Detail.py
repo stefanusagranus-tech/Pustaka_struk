@@ -126,41 +126,56 @@ btn_search = st.button("🔍 Cari", type="primary", use_container_width=True)
 # ⬇️⬇️⬇️ LANJUT KE BAGIAN 2 ⬇️⬇️⬇️
 
 # ============================================================
-# LOGIC SEARCH
+# SIMPAN STATE SEARCH
 # ============================================================
-if btn_search and keyword:
-    keyword = str(keyword).strip()
+if "cek_struk_search" not in st.session_state:
+    st.session_state.cek_struk_search = {
+        "mode": None,
+        "keyword": None,
+        "active": False,
+    }
 
+# Kalau tombol search ditekan
+if btn_search:
+    if not keyword:
+        st.warning("⚠️ Masukkan PLU atau Nomor Bon dulu.")
+    else:
+        st.session_state.cek_struk_search = {
+            "mode": mode,
+            "keyword": str(keyword).strip(),
+            "active": True,
+        }
+
+# ============================================================
+# LOGIC SEARCH (pakai state)
+# ============================================================
+if st.session_state.cek_struk_search["active"]:
+    mode = st.session_state.cek_struk_search["mode"]
+    keyword = st.session_state.cek_struk_search["keyword"]
+
+    # ============ SEARCH BY PLU ============
     if mode == "PLU":
-        # Search by PLU
         try:
             plu_target = int(keyword)
             df_result = df_detail[df_detail["plu_int"] == plu_target].copy()
         except ValueError:
-            # Kalau bukan angka, coba exact match string
             df_result = df_detail[df_detail["plu_str"] == keyword].copy()
 
         search_label = f"PLU {keyword}"
 
+    # ============ SEARCH BY NOMOR BON ============
     else:
-        # Search by Nomor Bon
-        # Nomor bon bisa "149" atau "119-27090149"
-        # Normalisasi: buang leading zero, ambil 3 digit terakhir
-
-        keyword_clean = keyword.replace("119-2709", "").replace("119-27090", "")
-        keyword_clean = keyword_clean.strip()
-
-        # Coba beberapa format
         if "-" in keyword:
-            # Format "119-27090149"
             bill_part = keyword.split("-")[-1]
             bill_target = str(bill_part).strip()
         else:
-            bill_target = keyword_clean
+            bill_target = keyword.strip()
 
-        # Cari di bill_str
+        # Hapus leading zero
+        bill_target_clean = bill_target.lstrip("0") or "0"
+
         df_result = df_detail[
-            df_detail["bill_str"].str.contains(bill_target, na=False)
+            df_detail["bill_str"].str.strip().str.lstrip("0") == bill_target_clean
         ].copy()
 
         search_label = f"Bon {keyword}"
@@ -170,56 +185,67 @@ if btn_search and keyword:
     # ============================================================
     if df_result.empty:
         st.warning(f"❌ Tidak ada transaksi untuk **{search_label}**.")
-        st.stop()
 
-    st.success(f"✅ Ditemukan **{len(df_result)} baris** untuk **{search_label}**.")
+        # Tombol reset
+        if st.button("🔄 Reset Pencarian", key="reset_search_empty"):
+            st.session_state.cek_struk_search["active"] = False
+            st.rerun()
+    else:
+        st.success(f"✅ Ditemukan **{len(df_result)} baris** untuk **{search_label}**.")
 
-    # ============================================================
-    # DASHBOARD HASIL
-    # ============================================================
-    st.markdown("---")
-    st.markdown("### 📊 Ringkasan Hasil")
+        # Tombol reset
+        col_r1, col_r2, col_r3 = st.columns([1, 1, 1])
+        with col_r2:
+            if st.button("🔄 Reset Pencarian", key="reset_search"):
+                st.session_state.cek_struk_search["active"] = False
+                st.session_state["cek_struk_selected_bill"] = None
+                st.rerun()
 
-    # KPI
-    total_struk = df_result["bill_str"].nunique()
-    total_sales = df_result["total_row"].sum()
-    total_qty = df_result["qty"].sum()
-    total_plu_unik = df_result["plu_int"].nunique()
+        # ============================================================
+        # DASHBOARD HASIL
+        # ============================================================
+        st.markdown("---")
+        st.markdown("### 📊 Ringkasan Hasil")
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🧾 Jumlah Struk", format(int(total_struk), ","))
-    c2.metric("📦 Total PLU Unik", format(int(total_plu_unik), ","))
-    c3.metric("🔢 Total Qty", format(int(total_qty), ","))
-    c4.metric("💰 Total Sales", "Rp " + format(total_sales, ",.0f"))
+        total_struk = df_result["bill_str"].nunique()
+        total_sales = df_result["total_row"].sum()
+        total_qty = df_result["qty"].sum()
+        total_plu_unik = df_result["plu_int"].nunique()
 
-    # ============================================================
-    # LIST PLU YANG MUNCUL
-    # ============================================================
-    st.markdown("---")
-    st.markdown("### 📋 List PLU yang Muncul")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("🧾 Jumlah Struk", format(int(total_struk), ","))
+        c2.metric("📦 Total PLU Unik", format(int(total_plu_unik), ","))
+        c3.metric("🔢 Total Qty", format(int(total_qty), ","))
+        c4.metric("💰 Total Sales", "Rp " + format(total_sales, ",.0f"))
 
-    plu_group = (
-        df_result.groupby("plu_int")
-        .agg(
-            Nama_Item=("plu_int", lambda x: get_nama_plu(x.iloc[0])),
-            Total_Qty=("qty", "sum"),
-            Total_Sales=("total_row", "sum"),
-            Jumlah_Transaksi=("bill_str", "nunique"),
+        # ============================================================
+        # LIST PLU YANG MUNCUL
+        # ============================================================
+        st.markdown("---")
+        st.markdown("### 📋 List PLU yang Muncul")
+
+        plu_group = (
+            df_result.groupby("plu_int")
+            .agg(
+                Total_Qty=("qty", "sum"),
+                Total_Sales=("total_row", "sum"),
+                Jumlah_Transaksi=("bill_str", "nunique"),
+            )
+            .reset_index()
+            .rename(columns={"plu_int": "PLU"})
+            .sort_values("Total_Sales", ascending=False)
         )
-        .reset_index()
-        .rename(columns={"plu_int": "PLU"})
-        .sort_values("Total_Sales", ascending=False)
-    )
 
-    # Format
-    plu_display = plu_group.copy()
-    plu_display["Total_Sales"] = plu_display["Total_Sales"].apply(
-        lambda x: "Rp " + format(x, ",.0f")
-    )
+        # Tambah nama
+        plu_group["Nama_Item"] = plu_group["PLU"].apply(get_nama_plu)
 
-    st.dataframe(plu_display, use_container_width=True, hide_index=True)
+        plu_display = plu_group[["PLU", "Nama_Item", "Total_Qty", "Total_Sales", "Jumlah_Transaksi"]].copy()
+        plu_display["Total_Sales"] = plu_display["Total_Sales"].apply(
+            lambda x: "Rp " + format(x, ",.0f")
+        )
 
-# ⬇️⬇️⬇️ LANJUT KE BAGIAN 3 ⬇️⬇️⬇️
+        st.dataframe(plu_display, use_container_width=True, hide_index=True)
+    # ⬇️⬇️⬇️ LANJUT KE BAGIAN 3 ⬇️⬇️⬇️
 
     # ============================================================
     # LIST TRANSAKSI (per struk)
