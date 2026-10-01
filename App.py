@@ -1,6 +1,6 @@
 """
 App.py — Pustaka Struk Main App
-Include: Login + Menu + Dashboard + Idea Box + Menu Analisis.
+Include: Login + Menu (3 tombol) + Dashboard + Idea Box + Manage PLU.
 """
 import streamlit as st
 import pandas as pd
@@ -8,7 +8,7 @@ import os
 import shutil
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -26,23 +26,30 @@ from utils.auth import (
     logout,
     back_to_menu,
 )
+from utils.plu_loader import (
+    KATEGORI,
+    list_plu_files,
+    save_plu_csv,
+    delete_plu_file,
+    load_plu_from_file,
+    load_plu_by_date,
+    get_stats,
+)
 
 # ============================================================
-# SETUP HALAMAN
+# SETUP
 # ============================================================
 setup_anonim_page("Pustaka Struk", "📦")
 apply_nav_style()
 
-# ============================================================
-# INIT AUTH
-# ============================================================
 init_auth_state()
 
 # ============================================================
-# PATH FILE IDEA BOX
+# PATH FILE
 # ============================================================
 IDEAS_FILE = "docs/ideas.json"
 ARCHIVE_FILE = "docs/ideas_archive.json"
+
 
 # ============================================================
 # HELPER JSON
@@ -140,18 +147,16 @@ def generate_steps(idea):
         f"Bikin query pandas untuk {idea['deskripsi'][:50]}...",
         f"Bikin file: {', '.join(idea['file_target'])}",
         "Bikin visualisasi (chart/table)",
-        "Tambah filter interaktif (date, kasir, dll)",
+        "Tambah filter interaktif",
         "Tambah tombol download CSV",
-        "Uji dengan data 27/09/2026",
+        "Uji dengan data",
         "Commit + push ke GitHub",
         "Update progress.json",
     ]
 
 
 def generate_blueprint_md(idea):
-    """Generate blueprint markdown siap kirim ke AI."""
     steps = generate_steps(idea)
-
     lines = []
     lines.append("# BLUEPRINT: " + str(idea['judul']))
     lines.append("")
@@ -169,13 +174,6 @@ def generate_blueprint_md(idea):
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("## Tujuan")
-    lines.append("")
-    lines.append("Bikin fitur/halaman baru di proyek Pustaka Struk")
-    lines.append("untuk **" + str(idea['judul']).lower() + "**.")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
     lines.append("## File Target")
     lines.append("")
     for f in idea['file_target']:
@@ -190,43 +188,16 @@ def generate_blueprint_md(idea):
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("## Sumber Data")
-    lines.append("")
-    lines.append("Tabel SQLite yang mungkin dipakai:")
-    lines.append("- `tx_tsale` (header penjualan)")
-    lines.append("- `tx_trans` (detail item)")
-    lines.append("- `log_receipt_prn` (data struk)")
-    lines.append("- `log_cashier` (data kasir)")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
     lines.append("## Catatan")
     lines.append("")
     lines.append(str(idea.get('catatan', '-')))
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-    lines.append("## Instruksi Untuk AI")
-    lines.append("")
-    lines.append("```")
-    lines.append("Halo AI, aku punya proyek Pustaka Struk.")
-    lines.append("Aku mau nambah fitur baru dengan spesifikasi di atas.")
-    lines.append("")
-    lines.append("Tolong:")
-    lines.append("1. Baca blueprint ini sampai habis.")
-    lines.append("2. Konfirmasi kalau sudah paham.")
-    lines.append("3. Bikin kodenya step by step.")
-    lines.append("4. Setiap step selesai, kasih checklist.")
-    lines.append("5. Bahasa: Indonesia santai tapi jelas.")
-    lines.append("```")
-
     return "\n".join(lines)
 
+# ⬇️⬇️⬇️ LANJUT KE BAGIAN 2 ⬇️⬇️⬇️
 
 # ============================================================
 # ROUTING
 # ============================================================
-
 if not st.session_state.logged_in:
     render_login_screen()
     st.stop()
@@ -238,7 +209,12 @@ if st.session_state.current_page is None:
 # Top bar
 col1, col2, col3 = st.columns([3, 1, 1])
 with col1:
-    page_name = "📊 Dashboard" if st.session_state.current_page == "dashboard" else "💡 Idea Box"
+    page_map = {
+        "dashboard": "📊 Dashboard",
+        "idea_box": "💡 Idea Box",
+        "manage_plu": "📋 Manage PLU",
+    }
+    page_name = page_map.get(st.session_state.current_page, "📄 Halaman")
     st.markdown(f"### {page_name}")
 with col2:
     if st.button("⬅️ Menu", use_container_width=True, key="top_back"):
@@ -249,7 +225,7 @@ with col3:
 
 st.markdown("---")
 
-# ⬇️⬇️⬇️ LANJUT KE BAGIAN 2 ⬇️⬇️⬇️
+
 # ============================================================
 # HALAMAN: DASHBOARD
 # ============================================================
@@ -315,7 +291,7 @@ if st.session_state.current_page == "dashboard":
 
     kasir_dict = build_kasir_dict_from_receipt(df_receipt)
 
-    # === PREPARE DATA ===
+    # === PREPARE ===
     df_sale["date_tx"] = pd.to_datetime(df_sale["date_tx"], errors="coerce")
     num_cols = [
         "total_faktur", "cash", "card", "discount", "promo_disc",
@@ -393,19 +369,6 @@ if st.session_state.current_page == "dashboard":
         total_noncommerce = 0
         total_trx_noncommerce = 0
 
-    noncommerce_per_kasir = {}
-    if not df_noncommerce.empty and "user_id" in df_noncommerce.columns:
-        nc_group = (
-            df_noncommerce.groupby("user_id")
-            .agg(Total_NC=("total_bayar", "sum"), Jumlah_NC=("bill_no", "nunique"))
-            .reset_index()
-        )
-        for _, r in nc_group.iterrows():
-            noncommerce_per_kasir[str(r["user_id"])] = {
-                "total": r["Total_NC"],
-                "jumlah": r["Jumlah_NC"],
-            }
-
     # === KPI ===
     st.markdown("---")
     st.subheader("💰 Ringkasan Performa")
@@ -465,6 +428,8 @@ if st.session_state.current_page == "dashboard":
     c9.metric("📱 Total E-Wallet", "Rp " + format(total_ewallet, ",.0f"))
     c10.metric("👥 Sales Member", "Rp " + format(total_sales_member, ",.0f"))
 
+# ⬇️⬇️⬇️ LANJUT KE BAGIAN 3 ⬇️⬇️⬇️
+
     # === JAM RAMAI ===
     st.markdown("---")
     st.subheader("🕐 Jam Ramai Transaksi")
@@ -495,25 +460,6 @@ if st.session_state.current_page == "dashboard":
             per_jam["Jumlah_Transaksi"] = per_jam["Jumlah_Transaksi"].astype(int)
             chart_data = per_jam.set_index("jam")["Jumlah_Transaksi"]
             st.bar_chart(chart_data, use_container_width=True)
-
-            per_jam_aktif = per_jam[per_jam["Jumlah_Transaksi"] > 0]
-            if not per_jam_aktif.empty:
-                jam_teramai = per_jam_aktif.loc[per_jam_aktif["Jumlah_Transaksi"].idxmax()]
-                jam_tersepi = per_jam_aktif.loc[per_jam_aktif["Jumlah_Transaksi"].idxmin()]
-
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.success(
-                        "🔥 Jam Teramai: "
-                        + str(int(jam_teramai["jam"])).zfill(2) + ":00"
-                        + " — " + str(int(jam_teramai["Jumlah_Transaksi"])) + " transaksi"
-                    )
-                with col_b:
-                    st.warning(
-                        "❄️ Jam Tersepi: "
-                        + str(int(jam_tersepi["jam"])).zfill(2) + ":00"
-                        + " — " + str(int(jam_tersepi["Jumlah_Transaksi"])) + " transaksi"
-                    )
         else:
             st.info("Tidak ada transaksi di rentang tanggal ini.")
     else:
@@ -545,9 +491,7 @@ if st.session_state.current_page == "dashboard":
 
             grp_member = grp[grp["is_member"] == True]
             sales_member = grp_member["total_faktur"].sum() if not grp_member.empty else 0
-            std_member = grp_member["faktur"].nunique() if not grp_member.empty else 0
             cash_klerk = hitung_cash_klerk(grp)
-
             ewallet_kasir = grp["wallet"].sum() if "wallet" in grp.columns else 0
             nama_kasir = kasir_dict.get(nik_str, "-")
 
@@ -576,9 +520,7 @@ if st.session_state.current_page == "dashboard":
             mime="text/csv",
         )
 
-    # ============================================================
-    # 🆕 MENU HALAMAN ANALISIS (muncul setelah database diupload)
-    # ============================================================
+    # === MENU HALAMAN ANALISIS ===
     st.markdown("---")
     st.markdown("### 📂 Halaman Analisis")
     st.caption("Database udah ke-load — tap tombol di bawah buat analisis")
@@ -598,32 +540,19 @@ if st.session_state.current_page == "dashboard":
             st.switch_page("pages/3_struk_Suger.py")
 
     st.markdown("---")
-
     st.markdown("### 🔧 Tools")
-    st.caption("Alat bantu audit")
 
     col_t1, col_t2 = st.columns(2)
 
     with col_t1:
-        if st.button("🧾 Cek Struk Detail", use_container_width=True, key="dash_nav_cek_struk"):
+        if st.button("🔍 Cek Struk Detail", use_container_width=True, key="dash_nav_cek_struk"):
             st.switch_page("pages/7_Cek_Struk_Detail.py")
 
     with col_t2:
-    if st.button("❌ Void Transaksi", use_container_width=True, key="dash_nav_void"):
-        st.switch_page("pages/6_Cek_Struk_Void.py")
+        if st.button("❌ Void Transaksi", use_container_width=True, key="dash_nav_void"):
+            st.switch_page("pages/6_Cek_Struk_Void.py")
 
-    st.markdown("---")
 
-    st.markdown("### ⚙️ Pengaturan")
-    st.caption("Kelola data master")
-
-    col_m1, col_m2 = st.columns(2)
-
-    with col_m1:
-      if st.button("📋 Manage PLU", use_container_width=True, key="dash_nav_manage_plu"):
-          st.switch_page("pages/8_Manage_PLU.py")
-
-# ⬇️⬇️⬇️ LANJUT KE BAGIAN 3 ⬇️⬇️⬇️
 # ============================================================
 # HALAMAN: IDEA BOX
 # ============================================================
@@ -643,7 +572,7 @@ elif st.session_state.current_page == "idea_box":
         "⚙️ Pengaturan"
     ])
 
-    # === TAB 1: TAMBAH IDE ===
+    # === TAB 1: TAMBAH ===
     with tab1:
         st.markdown("### ➕ Tambah Ide Baru")
 
@@ -651,16 +580,16 @@ elif st.session_state.current_page == "idea_box":
             col1, col2 = st.columns(2)
 
             with col1:
-                judul = st.text_input("Judul Ide *", placeholder="Contoh: Analisis Jam Ramai per Kasir")
+                judul = st.text_input("Judul Ide *")
                 kategori = st.selectbox("Kategori", ["Analytics", "Visualisasi", "Audit", "Monitoring", "Lainnya"])
                 prioritas = st.selectbox("Prioritas", ["Rendah", "Sedang", "Tinggi", "Urgent"])
 
             with col2:
                 estimasi = st.number_input("Estimasi (hari)", min_value=1, max_value=30, value=2)
                 file_target = st.text_input("File Target", placeholder="pages/14_Fitur_Baru.py")
-                catatan = st.text_area("Catatan (opsional)", placeholder="Butuh join tabel X + Y...", height=80)
+                catatan = st.text_area("Catatan (opsional)", height=80)
 
-            deskripsi = st.text_area("Deskripsi Ide *", placeholder="Jelaskan sedetail mungkin...", height=120)
+            deskripsi = st.text_area("Deskripsi Ide *", height=120)
 
             submitted = st.form_submit_button("🚀 Generate Blueprint", type="primary", use_container_width=True)
 
@@ -689,15 +618,15 @@ elif st.session_state.current_page == "idea_box":
                 st.balloons()
                 st.rerun()
 
-    # === TAB 2: DAFTAR IDE ===
+    # === TAB 2: DAFTAR ===
     with tab2:
         ideas_data = load_ideas()
 
         col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
         with col_f1:
-            filter_status = st.multiselect("Filter Status", ["pending", "in_progress", "done"], default=["pending", "in_progress"])
+            filter_status = st.multiselect("Status", ["pending", "in_progress", "done"], default=["pending", "in_progress"])
         with col_f2:
-            filter_prioritas = st.multiselect("Filter Prioritas", ["Rendah", "Sedang", "Tinggi", "Urgent"], default=["Rendah", "Sedang", "Tinggi", "Urgent"])
+            filter_prioritas = st.multiselect("Prioritas", ["Rendah", "Sedang", "Tinggi", "Urgent"], default=["Rendah", "Sedang", "Tinggi", "Urgent"])
         with col_f3:
             sort_by = st.selectbox("Sort", ["Terbaru", "Prioritas", "Judul"])
 
@@ -714,32 +643,21 @@ elif st.session_state.current_page == "idea_box":
         else:
             filtered.sort(key=lambda x: x[1]["judul"].lower())
 
-        st.markdown(f"### 📋 Daftar Ide ({len(filtered)} dari {len(ideas_data['ideas'])})")
+        st.markdown(f"### 📋 Daftar Ide ({len(filtered)})")
 
         if not filtered:
-            st.info("Tidak ada ide yang cocok dengan filter.")
+            st.info("Tidak ada ide.")
         else:
             for i, idea in filtered:
                 icon_pri = {"Urgent": "🔴", "Tinggi": "🟠", "Sedang": "🟡", "Rendah": "🟢"}.get(idea["prioritas"], "⚪")
                 icon_stat = {"pending": "⏳", "in_progress": "🚧", "done": "✅"}.get(idea["status"], "❓")
 
-                with st.expander(f"{icon_pri} {icon_stat} {idea['judul']} — {idea['prioritas']}"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.write(f"**ID:** `{idea['id']}`")
-                        st.write(f"**Kategori:** {idea['kategori']}")
-                        st.write(f"**Status:** {idea['status']}")
-                    with c2:
-                        st.write(f"**Estimasi:** {idea['estimasi_hari']} hari")
-                        st.write(f"**Dibuat:** {idea['tanggal_dibuat'][:10]}")
-                        st.write(f"**File:** `{', '.join(idea['file_target'])}`")
-
+                with st.expander(f"{icon_pri} {icon_stat} {idea['judul']}"):
+                    st.write(f"**ID:** `{idea['id']}`")
+                    st.write(f"**Kategori:** {idea['kategori']}")
+                    st.write(f"**Status:** {idea['status']}")
                     st.markdown("**Deskripsi:**")
                     st.write(idea["deskripsi"])
-
-                    if idea.get("catatan"):
-                        st.markdown("**Catatan:**")
-                        st.write(idea["catatan"])
 
                     md = generate_blueprint_md(idea)
 
@@ -754,46 +672,39 @@ elif st.session_state.current_page == "idea_box":
 
                     with col_c:
                         status_next = {"pending": "in_progress", "in_progress": "done", "done": "pending"}
-                        if st.button(f"🔄 {status_next.get(idea['status'], 'pending')}", key=f"stat_{idea['id']}", use_container_width=True):
+                        if st.button("🔄", key=f"stat_{idea['id']}", use_container_width=True):
                             ideas_data["ideas"][i]["status"] = status_next.get(idea["status"], "pending")
                             save_ideas(ideas_data)
                             st.rerun()
 
                     with col_d:
-                        if st.button("🗑️ Hapus", key=f"del_{idea['id']}", type="secondary", use_container_width=True):
+                        if st.button("🗑️", key=f"del_{idea['id']}", type="secondary", use_container_width=True):
                             st.session_state.confirm_delete = i
 
                     if st.session_state.get(f"show_copy_{idea['id']}"):
                         st.code(md, language="markdown")
-                        st.info("👆 Blok teks di atas → copy → paste ke AI lain")
+                        st.info("👆 Copy → paste ke AI lain")
                         if st.button("❌ Tutup", key=f"close_copy_{idea['id']}"):
                             st.session_state[f"show_copy_{idea['id']}"] = False
                             st.rerun()
 
-        # Konfirmasi hapus
         if st.session_state.confirm_delete is not None:
             idx = st.session_state.confirm_delete
             ideas_data = load_ideas()
-
             if 0 <= idx < len(ideas_data["ideas"]):
                 idea = ideas_data["ideas"][idx]
-                st.error("⚠️ Yakin mau hapus ide ini?")
+                st.error("⚠️ Yakin hapus ide ini?")
                 st.markdown(f"**Judul:** {idea['judul']}")
-                st.markdown(f"**Kategori:** {idea['kategori']}")
-                st.markdown("Ide ini akan dipindah ke **Arsip** (bisa di-restore nanti).")
-
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    if st.button("✅ Ya, ke Arsip", type="primary", key="yes_del", use_container_width=True):
+                    if st.button("✅ Ke Arsip", type="primary", key="yes_del", use_container_width=True):
                         hapus_ide(idx, soft=True)
                         st.session_state.confirm_delete = None
-                        st.success("✅ Ide dipindah ke arsip")
                         st.rerun()
                 with c2:
-                    if st.button("❌ Hapus Permanen", key="perm_del", use_container_width=True):
+                    if st.button("❌ Permanen", key="perm_del", use_container_width=True):
                         hapus_ide(idx, soft=False)
                         st.session_state.confirm_delete = None
-                        st.success("🗑️ Ide dihapus permanen")
                         st.rerun()
                 with c3:
                     if st.button("↩️ Batal", key="cancel_del", use_container_width=True):
@@ -804,52 +715,22 @@ elif st.session_state.current_page == "idea_box":
     with tab3:
         archive_data = load_archive()
 
-        st.markdown(f"### 🗑️ Arsip Ide ({len(archive_data['ideas'])})")
-        st.caption("Ide yang dihapus bisa di-restore dari sini.")
+        st.markdown(f"### 🗑️ Arsip ({len(archive_data['ideas'])})")
 
         if not archive_data["ideas"]:
             st.info("Arsip kosong.")
         else:
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("♻️ Restore Semua", key="restore_all", use_container_width=True):
-                    ideas_data = load_ideas()
-                    for idea in archive_data["ideas"]:
-                        idea.pop("tanggal_dihapus", None)
-                        idea.pop("alasan", None)
-                        idea["status"] = "pending"
-                        ideas_data["ideas"].append(idea)
-                    archive_data["ideas"] = []
-                    save_ideas(ideas_data)
-                    save_archive(archive_data)
-                    st.success("✅ Semua ide di-restore")
-                    st.rerun()
-
-            with col_b:
-                if st.button("🗑️ Kosongkan Arsip", type="secondary", key="clear_archive", use_container_width=True):
-                    archive_data["ideas"] = []
-                    save_archive(archive_data)
-                    st.success("🗑️ Arsip dikosongkan")
-                    st.rerun()
-
-            st.markdown("---")
-
             for i, idea in enumerate(archive_data["ideas"]):
-                with st.expander(f"📦 {idea['judul']} — {idea.get('tanggal_dihapus', 'N/A')[:10]}"):
-                    st.write(f"**Alasan:** {idea.get('alasan', '-')}")
-                    st.write(f"**Kategori:** {idea['kategori']}")
+                with st.expander(f"📦 {idea['judul']}"):
                     st.write(f"**Deskripsi:** {idea['deskripsi']}")
-
                     col_r, col_p = st.columns(2)
                     with col_r:
                         if st.button("♻️ Restore", key=f"restore_{i}", use_container_width=True):
                             restore_ide(i)
-                            st.success("✅ Ide di-restore")
                             st.rerun()
                     with col_p:
-                        if st.button("🗑️ Hapus Permanen", key=f"perm_{i}", type="secondary", use_container_width=True):
+                        if st.button("🗑️ Permanen", key=f"perm_{i}", type="secondary", use_container_width=True):
                             hapus_permanen(i)
-                            st.success("🗑️ Dihapus permanen")
                             st.rerun()
 
     # === TAB 4: PENGATURAN ===
@@ -859,31 +740,237 @@ elif st.session_state.current_page == "idea_box":
         ideas_data = load_ideas()
         archive_data = load_archive()
 
-        st.markdown("#### 📊 Statistik")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("📋 Ide Aktif", len(ideas_data["ideas"]))
-        c2.metric("🗑️ Di Arsip", len(archive_data["ideas"]))
+        c1.metric("📋 Aktif", len(ideas_data["ideas"]))
+        c2.metric("🗑️ Arsip", len(archive_data["ideas"]))
         c3.metric("⏳ Pending", sum(1 for i in ideas_data["ideas"] if i["status"] == "pending"))
         c4.metric("✅ Done", sum(1 for i in ideas_data["ideas"] if i["status"] == "done"))
 
-        st.markdown("---")
-        st.markdown("#### 📦 Export Semua Ide")
+# ⬇️⬇️⬇️ LANJUT KE BAGIAN 4 ⬇️⬇️⬇️
 
-        if ideas_data["ideas"]:
-            semua_md = f"# SEMUA IDE — {len(ideas_data['ideas'])} ide aktif\n\n"
-            semua_md += f"Generated: {datetime.now().strftime('%d %B %Y, %H:%M')}\n\n---\n\n"
-            for idea in ideas_data["ideas"]:
-                semua_md += generate_blueprint_md(idea) + "\n\n---\n\n"
 
-            st.download_button(
-                "📥 Download SEMUA Ide (.md)",
-                data=semua_md,
-                file_name=f"semua_ide_{datetime.now().strftime('%Y%m%d')}.md",
-                mime="text/markdown",
-                use_container_width=True,
+# ============================================================
+# HALAMAN: MANAGE PLU
+# ============================================================
+elif st.session_state.current_page == "manage_plu":
+
+    st.title("📋 Manage PLU")
+    st.markdown("Kelola PLU untuk 4 kategori: **PSM, SG, PWP, Suger**.")
+
+    # === STATISTIK ===
+    st.markdown("---")
+    st.markdown("### 📊 Statistik")
+
+    stats = get_stats()
+    cols = st.columns(4)
+
+    for i, (kat, info) in enumerate(stats.items()):
+        with cols[i]:
+            st.metric(
+                f"{info['icon']} {info['nama']}",
+                f"{info['jumlah_file']} file",
+                f"{info['total_plu']} PLU",
+            )
+
+    # === TABS ===
+    tab1, tab2, tab3 = st.tabs([
+        "📤 Upload PLU",
+        "📂 Daftar File",
+        "🔍 Cek PLU Aktif",
+    ])
+
+    # === TAB 1: UPLOAD ===
+    with tab1:
+        st.markdown("### 📤 Upload File PLU")
+
+        st.info(
+            "Format CSV harus punya kolom **PLU**. "
+            "Kolom lain (Desc, Mekanisme, Brand, Kat) optional."
+        )
+
+        with st.form("form_upload_plu"):
+            kategori_pilihan = st.selectbox(
+                "Kategori PLU:",
+                options=list(KATEGORI.keys()),
+                format_func=lambda x: f"{KATEGORI[x]['icon']} {KATEGORI[x]['nama']}",
+                key="upload_kategori",
+            )
+
+            uploaded = st.file_uploader(
+                "Pilih file CSV",
+                type=["csv"],
+                key="plu_csv_upload",
+            )
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                tahun = st.number_input("Tahun", min_value=2020, max_value=2100, value=date.today().year)
+
+            with col2:
+                bulan = st.number_input("Bulan", min_value=1, max_value=12, value=date.today().month)
+
+            with col3:
+                tgl_range = st.text_input("Rentang (contoh: 01_15)", value="01_15")
+
+            submit = st.form_submit_button("🚀 Upload & Simpan", type="primary", use_container_width=True)
+
+        if submit:
+            if not uploaded:
+                st.error("❌ Pilih file CSV dulu.")
+            else:
+                try:
+                    parts = tgl_range.strip().split("_")
+                    if len(parts) != 2:
+                        raise ValueError
+                    tgl_awal = int(parts[0])
+                    tgl_akhir = int(parts[1])
+                except (ValueError, IndexError):
+                    st.error("❌ Format rentang salah. Contoh: `01_15`")
+                    st.stop()
+
+                success, message, filepath = save_plu_csv(
+                    uploaded, kategori_pilihan, tahun, bulan, tgl_awal, tgl_akhir
+                )
+
+                if success:
+                    st.success(f"✅ {message}")
+                    st.balloons()
+                else:
+                    st.error(f"❌ {message}")
+
+    # === TAB 2: DAFTAR FILE ===
+    with tab2:
+        st.markdown("### 📂 Daftar File PLU")
+
+        kategori_lihat = st.selectbox(
+            "Pilih kategori:",
+            options=list(KATEGORI.keys()),
+            format_func=lambda x: f"{KATEGORI[x]['icon']} {KATEGORI[x]['nama']}",
+            key="lihat_kategori",
+        )
+
+        files = list_plu_files(kategori_lihat)
+
+        if not files:
+            st.info(f"Belum ada file PLU untuk **{KATEGORI[kategori_lihat]['nama']}**.")
+        else:
+            st.markdown(f"**Total {len(files)} file**")
+
+            df_files = pd.DataFrame([
+                {
+                    "Periode": f["periode_label"],
+                    "File": f["filename"],
+                    "Jumlah PLU": len(load_plu_from_file(f["path"])),
+                }
+                for f in files
+            ])
+
+            st.dataframe(df_files, use_container_width=True, hide_index=True)
+
+# ⬇️⬇️⬇️ LANJUT KE BAGIAN 5 ⬇️⬇️⬇️
+
+            st.markdown("---")
+            st.markdown("### 🗑️ Hapus File")
+
+            file_options = [f["filename"] for f in files]
+            to_delete = st.selectbox(
+                "Pilih file untuk dihapus:",
+                file_options,
+                key="plu_delete_select",
+            )
+
+            if st.button("🗑️ Hapus File", type="secondary"):
+                if delete_plu_file(kategori_lihat, to_delete):
+                    st.success(f"✅ File {to_delete} dihapus.")
+                    st.rerun()
+                else:
+                    st.error("❌ Gagal hapus.")
+
+            st.markdown("---")
+            st.markdown("### 👁️ Preview File")
+
+            preview_file = st.selectbox(
+                "Pilih file:",
+                file_options,
+                key="plu_preview_select",
+            )
+
+            preview_info = next((f for f in files if f["filename"] == preview_file), None)
+
+            if preview_info:
+                plu_list = load_plu_from_file(preview_info["path"])
+
+                st.markdown(f"**Periode:** {preview_info['periode_label']}")
+                st.markdown(f"**Jumlah PLU:** {len(plu_list)}")
+
+                if plu_list:
+                    df_preview = pd.DataFrame(plu_list[:50])
+                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
+
+                    if len(plu_list) > 50:
+                        st.caption(f"... dan {len(plu_list) - 50} PLU lainnya")
+
+    # === TAB 3: CEK PLU AKTIF ===
+    with tab3:
+        st.markdown("### 🔍 Cek PLU Aktif")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            kategori_cek = st.selectbox(
+                "Kategori:",
+                options=list(KATEGORI.keys()),
+                format_func=lambda x: f"{KATEGORI[x]['icon']} {KATEGORI[x]['nama']}",
+                key="cek_kategori",
+            )
+
+        with col2:
+            tgl_cek = st.date_input(
+                "Tanggal:",
+                value=date.today(),
+                key="plu_cek_tgl",
+            )
+
+        plu_list, file_info = load_plu_by_date(kategori_cek, tgl_cek)
+
+        if file_info is None:
+            st.warning(
+                f"⚠️ Tidak ada file PLU **{KATEGORI[kategori_cek]['nama']}** "
+                f"untuk tanggal {tgl_cek}."
             )
         else:
-            st.info("Belum ada ide untuk di-export.")
+            st.success(
+                f"✅ Periode: **{file_info['periode_label']}** "
+                f"({len(plu_list)} PLU)"
+            )
+
+            if plu_list:
+                df_plu = pd.DataFrame(plu_list)
+
+                keyword = st.text_input(
+                    "🔎 Cari PLU/Nama:",
+                    placeholder="Contoh: 434304 atau LEMONILO",
+                )
+
+                if keyword:
+                    keyword = str(keyword).strip().lower()
+                    nama_col = df_plu.get("nama", pd.Series([""] * len(df_plu)))
+                    mask = (
+                        df_plu["plu"].astype(str).str.contains(keyword, na=False)
+                        | nama_col.astype(str).str.lower().str.contains(keyword, na=False)
+                    )
+                    df_plu = df_plu[mask]
+                    st.caption(f"Ditemukan {len(df_plu)} PLU.")
+
+                st.dataframe(df_plu, use_container_width=True, hide_index=True)
+
+                st.download_button(
+                    f"📥 Download PLU {KATEGORI[kategori_cek]['nama']} ({tgl_cek})",
+                    data=df_plu.to_csv(index=False).encode("utf-8"),
+                    file_name=f"plu_{kategori_cek}_{tgl_cek}.csv",
+                    mime="text/csv",
+                )
 
 
 # ============================================================
