@@ -150,83 +150,81 @@ def generate_steps(idea):
 
 
 def generate_blueprint_md(idea):
+    """Generate blueprint markdown siap kirim ke AI."""
     steps = generate_steps(idea)
-    md = f"""# BLUEPRINT: {idea['judul']}
 
-**ID:** {idea['id']}
-**Kategori:** {idea['kategori']}
-**Prioritas:** {idea['prioritas']}
-**Estimasi:** {idea['estimasi_hari']} hari
-**Tanggal Dibuat:** {idea['tanggal_dibuat']}
+    # Header
+    lines = []
+    lines.append("# BLUEPRINT: " + str(idea['judul']))
+    lines.append("")
+    lines.append("**ID:** " + str(idea['id']))
+    lines.append("**Kategori:** " + str(idea['kategori']))
+    lines.append("**Prioritas:** " + str(idea['prioritas']))
+    lines.append("**Estimasi:** " + str(idea['estimasi_hari']) + " hari")
+    lines.append("**Tanggal Dibuat:** " + str(idea['tanggal_dibuat']))
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Deskripsi")
+    lines.append("")
+    lines.append(str(idea['deskripsi']))
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Tujuan")
+    lines.append("")
+    lines.append("Bikin fitur/halaman baru di proyek Pustaka Struk")
+    lines.append("untuk **" + str(idea['judul']).lower() + "**.")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## File Target")
+    lines.append("")
+    for f in idea['file_target']:
+        lines.append("- `" + str(f) + "`")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Step-by-Step")
+    lines.append("")
 
----
-
-## Deskripsi
-
-{idea['deskripsi']}
-
----
-
-## Tujuan
-
-Bikin fitur/halaman baru di proyek Pustaka Struk
-untuk **{idea['judul'].lower()}**.
-
----
-
-## File Target
-
-{chr(10).join(f'- `{f}`' for f in idea['file_target'])}
-
----
-
-## Step-by-Step
-
-"""
     for i, step in enumerate(steps, 1):
-        md += f"{i}. [ ] {step}\n"
+        lines.append(str(i) + ". [ ] " + str(step))
 
-    md += f"""
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Sumber Data")
+    lines.append("")
+    lines.append("Tabel SQLite yang mungkin dipakai:")
+    lines.append("- `tx_tsale` (header penjualan)")
+    lines.append("- `tx_trans` (detail item)")
+    lines.append("- `log_receipt_prn` (data struk)")
+    lines.append("- `log_cashier` (data kasir)")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Catatan")
+    lines.append("")
+    lines.append(str(idea.get('catatan', '-')))
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Instruksi Untuk AI")
+    lines.append("")
+    lines.append("```")
+    lines.append("Halo AI, aku punya proyek Pustaka Struk.")
+    lines.append("Aku mau nambah fitur baru dengan spesifikasi di atas.")
+    lines.append("")
+    lines.append("Tolong:")
+    lines.append("1. Baca blueprint ini sampai habis.")
+    lines.append("2. Konfirmasi kalau sudah paham.")
+    lines.append("3. Bikin kodenya step by step.")
+    lines.append("4. Setiap step selesai, kasih checklist.")
+    lines.append("5. Bahasa: Indonesia santai tapi jelas.")
+    lines.append("```")
 
----
-
-## Sumber Data
-
-Tabel SQLite yang mungkin dipakai:
-- `tx_tsale` (header penjualan)
-- `tx_trans` (detail item)
-- `log_receipt_prn` (data struk)
-- `log_cashier` (data kasir)
-
----
-
-## Catatan
-
-{idea.get('catatan', '-')}
-
----
-
-## Instruksi Untuk AI
-## Instruksi Untuk AI
-
-```
-
-Halo AI, aku punya proyek Pustaka Struk (Dashboard internal pakai Streamlit + SQLite).
-Aku mau nambah fitur baru dengan spesifikasi di atas.
-
-Tolong:
-
-1. Baca blueprint ini sampai habis.
-2. Konfirmasi kalau sudah paham.
-3. Bikin kodenya step by step sesuai checklist.
-4. Setiap step selesai, kasih checklist untuk dicentang.
-5. Bahasa: Indonesia santai tapi jelas.
-
-```
-"""
-    """
-    return md
-
+    return "\n".join(lines)
 
 # ============================================================
 # ROUTING
