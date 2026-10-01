@@ -777,12 +777,10 @@ elif st.session_state.current_page == "idea_box":
             if 0 <= idx < len(ideas_data["ideas"]):
                 idea = ideas_data["ideas"][idx]
                 st.error("⚠️ Yakin mau hapus ide ini?")
-                st.markdown(f"""
-                **Judul:** {idea['judul']}
-                **Kategori:** {idea['kategori']}
-
-                Ide ini akan dipindah ke **Arsip** (bisa di-restore nanti).
-                """)
+                st.error("⚠️ Yakin mau hapus ide ini?")
+                st.markdown(f"**Judul:** {idea['judul']}")
+                st.markdown(f"**Kategori:** {idea['kategori']}")
+                st.markdown("Ide ini akan dipindah ke **Arsip** (bisa di-restore nanti).")
 
                 c1, c2, c3 = st.columns(3)
                 with c1:
