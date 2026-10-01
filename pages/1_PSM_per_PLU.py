@@ -13,10 +13,10 @@ from utils.common import (
 from utils.plu_dict import get_nama_plu, get_plu_normalized
 from utils.plu_dict import get_nama_plu, get_plu_normalized
 
-st.set_page_config(
-    page_title="PSM per PLU",
-    page_icon="📦",
-    layout="wide",
+from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
+
+setup_anonim_page("1 PSM per PLU", "📊")
+apply_nav_style()
 )
 
 st.title("📦 Laporan PSM per PLU")
