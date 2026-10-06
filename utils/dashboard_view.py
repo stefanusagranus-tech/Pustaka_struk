@@ -358,7 +358,138 @@ def render_rekap_kasir(df, kasir_dict, noncommerce_per_kasir):
         mime="text/csv",
     )
 
+# ============================================================
+# Detail Transaksi Member
+# ============================================================
+def render_detail_member(df, kasir_dict, df_receipt):
+    """
+    Section detail transaksi member.
+    Menampilkan struk yang pakai member + nama member (dari log_receipt_prn).
+    """
+    render_section_title("Detail Transaksi Member", "👥")
 
+    if "cust_id" not in df.columns:
+        st.warning("Kolom `cust_id` tidak ditemukan di tx_tsale.")
+        return
+
+    # Pastikan flag is_member ada
+    if "is_member" not in df.columns:
+        df = df.copy()
+        df["is_member"] = df["cust_id"].apply(
+            lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
+            and pd.notna(x)
+        )
+
+    df_member = df[df["is_member"] == True].copy()
+
+    if df_member.empty:
+        st.info("Tidak ada transaksi member di rentang tanggal ini.")
+        return
+
+    # ---------- Extract nama member dari log_receipt_prn ----------
+    def extract_member_name(faktur_val):
+        """Cari nama member dari log_receipt_prn berdasarkan bill_no."""
+        if df_receipt.empty:
+            return "-"
+        # bill_no di receipt = angka terakhir dari faktur
+        # contoh: "119-27090149" -> "149"
+        try:
+            bill_no = str(faktur_val).split("-")[-1].lstrip("0") or "0"
+        except Exception:
+            return "-"
+
+        row = df_receipt[df_receipt["bill_no"].astype(str) == bill_no]
+        if row.empty:
+            return "-"
+
+        body = str(row.iloc[0].get("body1", ""))
+        import re
+        m = re.search(r"MEMBER\s*:\s*([^\|\n\r]+)", body)
+        if m:
+            return m.group(1).strip()
+        return "-"
+
+    # ---------- Bangun dataframe view ----------
+    df_member_view = df_member[[
+        "faktur", "date_tx", "time_tx", "user_id", "cust_id",
+        "total_faktur", "total_item"
+    ]].copy()
+
+    # Kolom tambahan
+    df_member_view["Nama Kasir"] = (
+        df_member_view["user_id"].astype(str).map(kasir_dict).fillna("-")
+    )
+    df_member_view["Nama Member"] = df_member_view["faktur"].apply(extract_member_name)
+
+    # Rename biar rapi
+    df_member_view = df_member_view.rename(columns={
+        "faktur": "Faktur",
+        "date_tx": "Tanggal",
+        "time_tx": "Jam",
+        "user_id": "NIK Kasir",
+        "cust_id": "No. Member",
+        "total_faktur": "Total",
+        "total_item": "Item",
+    })
+
+    # Susun ulang kolom
+    df_member_view = df_member_view[[
+        "Faktur", "Tanggal", "Jam", "Nama Kasir",
+        "Nama Member", "No. Member", "Item", "Total"
+    ]].sort_values(["Tanggal", "Jam"], ascending=[False, False]).reset_index(drop=True)
+
+    # ---------- Ringkasan ----------
+    total_struk = len(df_member_view)
+    total_member_unik = df_member_view["No. Member"].nunique()
+    total_sales = df_member_view["Total"].sum()
+    avg_basket = total_sales / total_struk if total_struk > 0 else 0
+
+    metric_grid([
+        {"label": "Jumlah Struk Member", "value": f"{total_struk:,}", "variant": "accent"},
+        {"label": "Member Unik", "value": f"{total_member_unik:,}"},
+        {"label": "Total Sales Member", "value": f"Rp {total_sales:,.0f}", "variant": "success"},
+        {"label": "Rata-rata Basket", "value": f"Rp {avg_basket:,.0f}", "variant": "warning"},
+    ], cols=4)
+
+    # ---------- Filter & Search ----------
+    col_f1, col_f2 = st.columns([2, 2])
+    with col_f1:
+        search = st.text_input(
+            "🔎 Cari Faktur / No. Member / Nama",
+            placeholder="Contoh: 119-27090149 atau IRFAN",
+            key="member_search",
+        )
+    with col_f2:
+        list_kasir = ["Semua"] + sorted(df_member_view["Nama Kasir"].unique().tolist())
+        filter_kasir = st.selectbox("Filter Kasir", list_kasir, key="member_filter_kasir")
+
+    df_show = df_member_view.copy()
+    if search:
+        kw = str(search).strip().lower()
+        mask = (
+            df_show["Faktur"].astype(str).str.lower().str.contains(kw, na=False)
+            | df_show["No. Member"].astype(str).str.lower().str.contains(kw, na=False)
+            | df_show["Nama Member"].astype(str).str.lower().str.contains(kw, na=False)
+        )
+        df_show = df_show[mask]
+
+    if filter_kasir != "Semua":
+        df_show = df_show[df_show["Nama Kasir"] == filter_kasir]
+
+    # ---------- Tabel ----------
+    st.caption(f"Menampilkan {len(df_show)} dari {len(df_member_view)} struk member.")
+    st.dataframe(df_show, use_container_width=True, hide_index=True)
+
+    # ---------- Download ----------
+    csv = df_show.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "📥 Download Detail Member (CSV)",
+        data=csv,
+        file_name="detail_member.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    
 # ============================================================
 # MAIN RENDER
 # ============================================================
@@ -394,6 +525,7 @@ def render_dashboard():
     render_kpi(df, df_card, df_noncommerce, tgl_range)
     render_jam_ramai(df)
     render_rekap_kasir(df, kasir_dict, noncommerce_per_kasir)
+    render_detail_member(df, kasir_dict, df_receipt)   # ← TAMBAHKAN INI
 
     # Navigasi ke halaman analisis
     render_section_title("Halaman Analisis", "📂")
