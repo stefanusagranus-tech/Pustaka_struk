@@ -18,8 +18,8 @@
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("service-worker.js")
-          .then(reg => console.log("[PWA] Service Worker registered"))
-          .catch(err => console.log("[PWA] SW registration failed:", err));
+          .then(reg => console.log("[PWA] SW registered"))
+          .catch(err => console.log("[PWA] SW failed:", err));
       });
     }
   </script>
@@ -27,18 +27,14 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { 
-      width: 100%; 
-      height: 100%; 
+      width: 100%; height: 100%; 
       overflow: hidden; 
       background-color: #0E1117;
     }
     iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-      display: block;
+      width: 100%; height: 100%; 
+      border: none; display: block;
     }
-    /* Offline indicator */
     #offline-banner {
       display: none;
       position: fixed;
@@ -57,9 +53,8 @@
 <body>
   <div id="offline-banner">📡 Tidak ada koneksi internet</div>
   
-  <!-- GANTI URL DI BAWAH DENGAN URL STREAMLIT-MU -->
   <iframe 
-    src="https://pustaka-struk.streamlit.app/?embed=true&show_footer=false" 
+    src="https://pustakastruk-v01.streamlit.app/?embed=true&show_footer=false" 
     title="Pustaka Struk"
     allow="clipboard-read; clipboard-write"
   ></iframe>
