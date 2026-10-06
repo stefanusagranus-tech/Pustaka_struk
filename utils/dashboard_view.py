@@ -146,7 +146,7 @@ def load_and_prepare():
         if "disc" in df_noncommerce.columns:
             df_noncommerce["total_bayar"] -= df_noncommerce["disc"]
 
-    return df_sale, df_card, df_receipt, df_noncommerce, df_usi, kasir_dict
+    return df_sale, df_card, df_receipt, df_noncommerce, df_usi, df_trans, kasir_dict
 
 
 # ============================================================
@@ -659,7 +659,7 @@ def render_dashboard():
     if not render_upload_section():
         st.stop()
 
-    df_sale, df_card, df_receipt, df_noncommerce, df_usi, kasir_dict = load_and_prepare()
+    df_sale, df_card, df_receipt, df_noncommerce, df_usi, df_trans, kasir_dict = load_and_prepare()
     tgl_range = render_date_filter(df_sale)
     df, df_noncommerce = apply_filter(df_sale, df_noncommerce, tgl_range)
     st.caption(f"Menampilkan {len(df)} transaksi.")
@@ -681,7 +681,7 @@ def render_dashboard():
     render_kpi(df, df_card, df_noncommerce, tgl_range)
     render_jam_ramai(df)
     render_rekap_kasir(df, kasir_dict, noncommerce_per_kasir)
-    render_detail_member(df, kasir_dict, df_usi)
+    render_detail_member(df, kasir_dict, df_usi, df_trans)
 
     # Navigasi
     render_section_title("Halaman Analisis", "📂")
