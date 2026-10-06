@@ -1,107 +1,102 @@
 """
-6_Cek_Struk_Void.py — Laporan Void Transaksi.
+pages/6_Cek_Struk_Void.py — Cek & void transaksi.
 """
-import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import sys
 
 import pandas as pd
 import streamlit as st
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.anonim import setup_anonim_page, apply_nav_style
+from utils.ui_theme import apply_theme
+from utils.ui_components import (
+    render_page_header,
+    render_footer,
+    render_section_title,
+    metric_grid,
+)
+from utils.auth import init_auth_state
 from utils.common import load_tables
-from utils.anonim import setup_anonim_page, render_nav_universal, apply_nav_style
-from utils.nav_helper import render_back_to_dashboard, safe_stop
 
-# ============================================================
-# SETUP
-# ============================================================
-setup_anonim_page("Laporan Void Transaksi", "❌")
+setup_anonim_page("Cek Struk Void", "❌")
+apply_theme()
 apply_nav_style()
+init_auth_state()
 
-st.title("❌ Laporan Void Transaksi")
-st.markdown("Menampilkan transaksi yang dibatalkan (void) dari `tx_trans`.")
+if not st.session_state.get("logged_in", False):
+    st.warning("Silakan login dulu di halaman utama.")
+    st.stop()
 
-# ============================================================
-# CEK DATABASE
-# ============================================================
-db_file = st.session_state.get("db_path", None)
-
-if not db_file:
-    st.warning("Belum ada database. Buka halaman Dashboard dulu untuk upload ZIP.")
-    safe_stop("void")
-
-st.success("Database: " + st.session_state.get("db_name", ""))
+render_page_header(
+    "Cek Struk Void",
+    "Cari & periksa transaksi yang di-void",
+    icon="❌",
+)
 
 # ============================================================
-# MAIN
+# KONTEN
 # ============================================================
+if "db_path" not in st.session_state:
+    st.warning("⚠️ Belum ada database. Upload dulu di Dashboard.")
+    st.stop()
+
+@st.cache_data(show_spinner=False)
+def load_data(db_path):
+    tables = ["tx_tsale", "tx_trans", "log_et_reversal", "log_trans_sync"]
+    return load_tables(db_path, tables)
+
 try:
-    dfs = load_tables(db_file, ["tx_trans"])
-    df_trans = dfs.get("tx_trans", pd.DataFrame())
+    dfs = load_data(st.session_state["db_path"])
+    df_sale = dfs.get("tx_tsale", pd.DataFrame())
+    df_reversal = dfs.get("log_et_reversal", pd.DataFrame())
+except Exception as e:
+    st.error(f"Gagal load database: {e}")
+    st.stop()
 
-    if df_trans.empty:
-        st.info("Tabel tx_trans kosong.")
-        safe_stop("void")
+# Ringkasan
+render_section_title("Ringkasan Void", "📈")
 
-    # Cari void
-    df_void = pd.DataFrame()
+total_void = len(df_reversal) if not df_reversal.empty else 0
 
-    if "flag" in df_trans.columns:
-        df_void = df_trans[
-            df_trans["flag"].astype(str).str.upper().isin(["V", "VOID", "1"])
-        ].copy()
+metric_grid([
+    {"label": "Total Void", "value": f"{total_void:,}", "variant": "danger"},
+], cols=1)
 
-    if df_void.empty and "flag_return" in df_trans.columns:
-        df_void = df_trans[
-            df_trans["flag_return"].astype(str).str.upper().isin(["T", "TRUE", "1", "Y"])
-        ].copy()
+# Pencarian faktur
+render_section_title("Cari Faktur", "🔎")
+faktur_input = st.text_input("Masukkan nomor faktur:", placeholder="Contoh: 119-27090149")
 
-    if df_void.empty:
-        st.info("Tidak ada data void di database ini.")
-        safe_stop("void")
+if faktur_input:
+    # Cek di tx_tsale
+    if not df_sale.empty and "faktur" in df_sale.columns:
+        result = df_sale[df_sale["faktur"].astype(str).str.contains(faktur_input, na=False)]
+        if not result.empty:
+            st.success(f"✅ Faktur ditemukan di tx_tsale ({len(result)} baris)")
+            st.dataframe(result, use_container_width=True, hide_index=True)
+        else:
+            st.warning("⚠️ Faktur tidak ditemukan di tx_tsale.")
 
-    # Normalisasi
-    for c in ["qty", "price", "disc"]:
-        if c in df_void.columns:
-            df_void[c] = pd.to_numeric(df_void[c], errors="coerce").fillna(0)
+    # Cek di log_et_reversal
+    if not df_reversal.empty and "faktur" in df_reversal.columns:
+        result_rev = df_reversal[df_reversal["faktur"].astype(str).str.contains(faktur_input, na=False)]
+        if not result_rev.empty:
+            st.error(f"❌ Faktur ada di log reversal ({len(result_rev)} baris)")
+            st.dataframe(result_rev, use_container_width=True, hide_index=True)
 
-    df_void["total"] = df_void["price"] * df_void["qty"]
-
-    # KPI
-    total_void = df_void["bill_no"].nunique() if "bill_no" in df_void.columns else len(df_void)
-    total_item = len(df_void)
-    total_qty = int(df_void["qty"].sum()) if "qty" in df_void.columns else 0
-    total_nilai = df_void["total"].sum() if "total" in df_void.columns else 0
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🧾 Total Struk Void", format(total_void, ","))
-    c2.metric("📦 Total Item", format(total_item, ","))
-    c3.metric("🔢 Total Qty", format(total_qty, ","))
-    c4.metric("💰 Total Nilai", "Rp " + format(total_nilai, ",.0f"))
-
-    st.markdown("---")
-
-    # Tabel
-    display_cols = [c for c in ["date_tx", "bill_no", "user_id", "plu", "qty", "price", "total"] if c in df_void.columns]
-    if display_cols:
-        st.dataframe(df_void[display_cols], use_container_width=True, hide_index=True)
-    else:
-        st.dataframe(df_void, use_container_width=True, hide_index=True)
-
+# Tabel void
+render_section_title("Daftar Void", "📋")
+if not df_reversal.empty:
+    st.dataframe(df_reversal, use_container_width=True, hide_index=True)
+    csv = df_reversal.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "📥 Download Void (CSV)",
-        data=df_void.to_csv(index=False).encode("utf-8"),
-        file_name="void_transaksi.csv",
+        "📥 Download Daftar Void (CSV)",
+        data=csv,
+        file_name="daftar_void.csv",
         mime="text/csv",
     )
+else:
+    st.info("Tidak ada data void.")
 
-except Exception as e:
-    st.error("Error: " + str(e))
-    st.exception(e)
-    safe_stop("void")
-
-# ============================================================
-# TOMBOL BAWAH
-# ============================================================
-render_nav_universal("void")
-render_back_to_dashboard("void")
+render_footer()
