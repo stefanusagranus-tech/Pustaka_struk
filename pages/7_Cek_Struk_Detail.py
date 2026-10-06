@@ -1,305 +1,157 @@
 """
-7_Cek_Struk_Detail.py
-Search PLU atau Nomor Bon → tampil struk + list transaksi.
+pages/7_Cek_Struk_Detail.py — Cek detail struk.
 """
-import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import sys
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
-from utils.common import (
-    load_tables,
-    render_struk_html,
-    generate_pdf,
-    render_print_button,
-    get_struk_text,
-    build_plu_name_dict,
-)
-from utils.plu_dict import get_nama_plu, get_plu_normalized
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from utils.anonim import setup_anonim_page, apply_nav_style
+from utils.ui_theme import apply_theme
+from utils.ui_components import (
+    render_page_header,
+    render_footer,
+    render_section_title,
+    metric_grid,
+)
+from utils.auth import init_auth_state
+from utils.common import load_tables
 
-# ============================================================
-# SETUP
-# ============================================================
 setup_anonim_page("Cek Struk Detail", "🔍")
+apply_theme()
 apply_nav_style()
+init_auth_state()
 
-st.title("🔍 Cek Struk Detail")
-st.markdown("Search PLU atau Nomor Bon → lihat struk + rekap transaksi.")
-
-# ============================================================
-# CEK DATABASE
-# ============================================================
-db_file = st.session_state.get("db_path", None)
-
-if not db_file:
-    st.warning("Belum ada database. Buka halaman Dashboard dulu untuk upload ZIP.")
-    st.markdown("---")
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        if st.button("🏠 Kembali ke Menu Utama", use_container_width=True, type="primary"):
-            st.switch_page("App.py")
+if not st.session_state.get("logged_in", False):
+    st.warning("Silakan login dulu di halaman utama.")
     st.stop()
 
-st.success("Database aktif: " + st.session_state.get("db_name", ""))
+render_page_header(
+    "Cek Struk Detail",
+    "Lihat detail lengkap sebuah transaksi",
+    icon="🔍",
+)
 
 # ============================================================
-# LOAD TABEL
+# KONTEN
 # ============================================================
+if "db_path" not in st.session_state:
+    st.warning("⚠️ Belum ada database. Upload dulu di Dashboard.")
+    st.stop()
+
 @st.cache_data(show_spinner=False)
-def load_all(db_path):
-    tables = ["tx_tsale", "tx_trans", "log_receipt_prn"]
+def load_data(db_path):
+    tables = ["tx_tsale", "tx_trans", "log_receipt_prn", "tx_tsale_card"]
     return load_tables(db_path, tables)
 
-
 try:
-    dfs = load_all(db_file)
+    dfs = load_data(st.session_state["db_path"])
     df_sale = dfs.get("tx_tsale", pd.DataFrame())
-    df_detail = dfs.get("tx_trans", pd.DataFrame())
+    df_trans = dfs.get("tx_trans", pd.DataFrame())
     df_receipt = dfs.get("log_receipt_prn", pd.DataFrame())
+    df_card = dfs.get("tx_tsale_card", pd.DataFrame())
 except Exception as e:
-    st.error("Gagal load database: " + str(e))
+    st.error(f"Gagal load database: {e}")
     st.stop()
 
-if df_detail.empty:
-    st.error("Tabel tx_trans kosong atau tidak ditemukan.")
+# Input faktur
+render_section_title("Cari Faktur", "🔎")
+faktur_input = st.text_input(
+    "Masukkan nomor faktur:",
+    placeholder="Contoh: 119-27090149",
+    key="detail_faktur",
+)
+
+if not faktur_input:
+    st.info("Masukkan nomor faktur untuk melihat detail.")
     st.stop()
 
-# ============================================================
-# PREPARE DATA
-# ============================================================
-if "plu" in df_detail.columns:
-    df_detail["plu_str"] = df_detail["plu"].astype(str).str.strip()
-    df_detail["plu_int"] = pd.to_numeric(
-        df_detail["plu_str"], errors="coerce"
-    ).fillna(0).astype(int)
+# ---- Header struk ----
+sale = pd.DataFrame()
+if not df_sale.empty and "faktur" in df_sale.columns:
+    sale = df_sale[df_sale["faktur"].astype(str) == faktur_input.strip()]
 
-if "bill_no" in df_detail.columns:
-    df_detail["bill_str"] = df_detail["bill_no"].astype(str).str.strip()
+if sale.empty:
+    st.error(f"❌ Faktur `{faktur_input}` tidak ditemukan.")
+    st.stop()
 
-for c in ["qty", "price", "disc"]:
-    if c in df_detail.columns:
-        df_detail[c] = pd.to_numeric(df_detail[c], errors="coerce").fillna(0)
+st.success(f"✅ Faktur ditemukan")
 
-df_detail["total_row"] = df_detail["price"] * df_detail["qty"]
-if "disc" in df_detail.columns:
-    df_detail["total_row"] = df_detail["total_row"] - df_detail["disc"]
+# ---- Info utama ----
+render_section_title("Info Struk", "🧾")
+row = sale.iloc[0]
 
-# ============================================================
-# SESSION STATE
-# ============================================================
-if "cek_struk_search" not in st.session_state:
-    st.session_state.cek_struk_search = {
-        "mode": None,
-        "keyword": None,
-        "active": False,
-    }
+metric_grid([
+    {"label": "Faktur", "value": str(row.get("faktur", "-")), "variant": "accent"},
+    {"label": "Tanggal", "value": str(row.get("date_tx", "-"))},
+    {"label": "Jam", "value": str(row.get("time_tx", "-"))},
+    {"label": "Kasir (NIK)", "value": str(row.get("user_id", "-"))},
+], cols=4)
 
-if "cek_struk_selected_bill" not in st.session_state:
-    st.session_state.cek_struk_selected_bill = None
+metric_grid([
+    {"label": "Total Faktur", "value": f"Rp {float(row.get('total_faktur', 0) or 0):,.0f}", "variant": "success"},
+    {"label": "Diskon", "value": f"Rp {float(row.get('discount', 0) or 0):,.0f}", "variant": "warning"},
+    {"label": "Promo Disc", "value": f"Rp {float(row.get('promo_disc', 0) or 0):,.0f}", "variant": "warning"},
+    {"label": "Cash", "value": f"Rp {float(row.get('cash', 0) or 0):,.0f}"},
+], cols=4)
 
-# ============================================================
-# UI: FORM SEARCH
-# ============================================================
-st.markdown("---")
-st.markdown("### 🔎 Search")
+metric_grid([
+    {"label": "Card", "value": f"Rp {float(row.get('card', 0) or 0):,.0f}"},
+    {"label": "E-Wallet", "value": f"Rp {float(row.get('wallet', 0) or 0):,.0f}"},
+    {"label": "Voucher", "value": f"Rp {float(row.get('voucher', 0) or 0):,.0f}"},
+    {"label": "Online Payment", "value": f"Rp {float(row.get('ol_payment', 0) or 0):,.0f}"},
+], cols=4)
 
-col_mode, col_keyword = st.columns([1, 3])
+# ---- Info Member ----
+render_section_title("Info Member", "👤")
+cust_id = row.get("cust_id", "")
+if pd.notna(cust_id) and str(cust_id).strip() not in ["", "0", "0.0", "nan", "None"]:
+    st.success(f"✅ Transaksi menggunakan member: **{cust_id}**")
+else:
+    st.info("ℹ️ Transaksi non-member (tidak pakai member).")
 
-with col_mode:
-    mode = st.selectbox(
-        "Mode",
-        ["PLU", "Nomor Bon"],
-        key="search_mode_input",
-    )
-
-with col_keyword:
-    if mode == "PLU":
-        keyword = st.text_input(
-            "Masukkan PLU (bisa sebagian)",
-            placeholder="Contoh: 234 → muncul 2342, 23400, dll",
-            key="search_plu_input",
+# ---- Detail item ----
+render_section_title("Detail Item", "📦")
+if not df_trans.empty and "bill_no" in df_trans.columns:
+    bill_no = str(row.get("faktur", "")).split("-")[-1].lstrip("0")
+    items = df_trans[df_trans["bill_no"].astype(str) == bill_no]
+    if not items.empty:
+        cols_show = [c for c in ["plu", "subdept", "price", "qty", "disc", "saving", "promo_code", "promo_no"] if c in items.columns]
+        st.dataframe(items[cols_show], use_container_width=True, hide_index=True)
+        csv = items.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Download Detail Item (CSV)",
+            data=csv,
+            file_name=f"detail_{faktur_input}.csv",
+            mime="text/csv",
         )
     else:
-        keyword = st.text_input(
-            "Masukkan Nomor Bon",
-            placeholder="Contoh: 149 atau 119-27090149",
-            key="search_bon_input",
-        )
+        st.info("Tidak ada detail item di tx_trans.")
 
-col_btn1, col_btn2 = st.columns([1, 1])
+# ---- Struk ----
+render_section_title("Struk", "🧾")
+if not df_receipt.empty and "bill_no" in df_receipt.columns:
+    bill_no_str = str(row.get("faktur", "")).split("-")[-1]
+    receipt = df_receipt[df_receipt["bill_no"].astype(str) == bill_no_str.lstrip("0")]
+    if not receipt.empty:
+        r = receipt.iloc[0]
+        for col in ["header", "body1", "body2", "body3", "addtl1", "addtl2", "addtl3", "footer"]:
+            if col in receipt.columns and pd.notna(r.get(col)):
+                st.text(str(r.get(col)))
 
-with col_btn1:
-    btn_search = st.button("🔍 Cari", type="primary", use_container_width=True)
-
-with col_btn2:
-    btn_reset = st.button("🔄 Reset", use_container_width=True)
-
-# ⬇️⬇️⬇️ LANJUT KE BAGIAN 2 ⬇️⬇️⬇️
-
-# ============================================================
-# HANDLE RESET
-# ============================================================
-if btn_reset:
-    st.session_state.cek_struk_search = {
-        "mode": None,
-        "keyword": None,
-        "active": False,
-    }
-    st.session_state.cek_struk_selected_bill = None
-    st.rerun()
-
-# ============================================================
-# HANDLE SEARCH BUTTON
-# ============================================================
-if btn_search:
-    if not keyword or not str(keyword).strip():
-        st.warning("⚠️ Masukkan PLU atau Nomor Bon dulu.")
+# ---- Kartu ----
+render_section_title("Kartu / Debit", "💳")
+if not df_card.empty and "faktur" in df_card.columns:
+    card = df_card[df_card["faktur"].astype(str) == faktur_input.strip()]
+    if not card.empty:
+        st.dataframe(card, use_container_width=True, hide_index=True)
     else:
-        st.session_state.cek_struk_search = {
-            "mode": mode,
-            "keyword": str(keyword).strip(),
-            "active": True,
-        }
-        st.session_state.cek_struk_selected_bill = None
+        st.info("Tidak ada data kartu.")
 
-# ============================================================
-# LOGIC SEARCH (baca dari session state)
-# ============================================================
-if st.session_state.cek_struk_search["active"]:
-    mode = st.session_state.cek_struk_search["mode"]
-    keyword = st.session_state.cek_struk_search["keyword"]
-
-    # ============ SEARCH BY PLU (FLEKSIBEL) ============
-    if mode == "PLU":
-        keyword_clean = keyword.strip()
-
-        # Coba konversi ke int
-        try:
-            plu_target = int(keyword_clean)
-            keyword_int = plu_target
-        except ValueError:
-            plu_target = None
-            keyword_int = None
-
-        # Strategi search:
-        # 1. Exact match (kalau keyword persis)
-        # 2. Prefix match (kalau keyword cuma sebagian)
-        # 3. Contains match (paling fleksibel)
-
-        df_result = pd.DataFrame()
-
-        if keyword_int is not None:
-            keyword_str = str(keyword_int)
-
-            # Cari PLU yang str-nya DIAWALI keyword
-            df_detail["plu_str_full"] = df_detail["plu_int"].astype(str)
-            df_result = df_detail[
-                df_detail["plu_str_full"].str.startswith(keyword_str)
-            ].copy()
-
-            # Kalau hasil kosong, coba contains
-            if df_result.empty:
-                df_result = df_detail[
-                    df_detail["plu_str_full"].str.contains(keyword_str, na=False)
-                ].copy()
-        else:
-            # Kalau bukan angka, cari exact string
-            df_result = df_detail[df_detail["plu_str"] == keyword_clean].copy()
-
-        search_label = f"PLU {keyword}"
-
-    # ============ SEARCH BY NOMOR BON ============
-    else:
-        if "-" in keyword:
-            bill_part = keyword.split("-")[-1]
-            bill_target = str(bill_part).strip()
-        else:
-            bill_target = keyword.strip()
-
-        bill_target_clean = bill_target.lstrip("0") or "0"
-
-        df_detail["bill_clean"] = (
-            df_detail["bill_str"].astype(str).str.strip().str.lstrip("0")
-        )
-
-        df_result = df_detail[
-            df_detail["bill_clean"] == bill_target_clean
-        ].copy()
-
-        search_label = f"Bon {keyword}"
-
-    # ============================================================
-    # HASIL SEARCH
-    # ============================================================
-    if df_result.empty:
-        st.warning(f"❌ Tidak ada transaksi untuk **{search_label}**.")
-        st.info("💡 Coba keyword lain atau reset pencarian.")
-
-    else:
-        st.success(f"✅ Ditemukan **{len(df_result)} baris** untuk **{search_label}**.")
-
-        # ============================================================
-        # DASHBOARD HASIL
-        # ============================================================
-        st.markdown("---")
-        st.markdown("### 📊 Ringkasan Hasil")
-
-        total_struk = df_result["bill_str"].nunique()
-        total_sales = df_result["total_row"].sum()
-        total_qty = df_result["qty"].sum()
-        total_plu_unik = df_result["plu_int"].nunique()
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("🧾 Jumlah Struk", format(int(total_struk), ","))
-        c2.metric("📦 Total PLU Unik", format(int(total_plu_unik), ","))
-        c3.metric("🔢 Total Qty", format(int(total_qty), ","))
-        c4.metric("💰 Total Sales", "Rp " + format(total_sales, ",.0f"))
-
-        # ============================================================
-        # LIST PLU YANG MUNCUL
-        # ============================================================
-        st.markdown("---")
-        st.markdown("### 📋 List PLU yang Muncul")
-
-        plu_group = (
-            df_result.groupby("plu_int")
-            .agg(
-                Total_Qty=("qty", "sum"),
-                Total_Sales=("total_row", "sum"),
-                Jumlah_Transaksi=("bill_str", "nunique"),
-            )
-            .reset_index()
-            .rename(columns={"plu_int": "PLU"})
-            .sort_values("Total_Sales", ascending=False)
-        )
-
-        plu_group["Nama_Item"] = plu_group["PLU"].apply(get_nama_plu)
-
-        plu_display = plu_group[
-            ["PLU", "Nama_Item", "Total_Qty", "Total_Sales", "Jumlah_Transaksi"]
-        ].copy()
-        plu_display["Total_Sales"] = plu_display["Total_Sales"].apply(
-            lambda x: "Rp " + format(x, ",.0f")
-        )
-
-        st.dataframe(plu_display, use_container_width=True, hide_index=True)
-
-# ⬇️⬇️⬇️ LANJUT KE BAGIAN 3 ⬇️⬇️⬇️
-
-        # ============================================================
-        # LIST TRANSAKSI (per struk)
-        # ============================================================
-        st.markdown("---")
-        st.markdown("### 📄 List Transaksi")
-
-        struk_group = (
-            df_result.groupby("bill_str")
-            .agg(
-                Jumlah_Item=("plu_int", "count"),
+render_footer()int", "count"),
                 Total_Qty=("qty", "sum"),
                 Total_Sales=("total_row", "sum"),
             )
