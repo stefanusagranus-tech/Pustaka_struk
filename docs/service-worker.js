@@ -1,28 +1,37 @@
-// Service Worker Pustaka Struk
-// Versi: v1 — minimal & valid
-
 const CACHE_NAME = 'pustaka-struk-v1';
+const urlsToCache = [
+  './',
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png'
+];
 
-// Install: skip waiting biar langsung aktif
-self.addEventListener('install', function(event) {
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+  );
   self.skipWaiting();
 });
 
-// Activate: klaim semua client
-self.addEventListener('activate', function(event) {
-  event.waitUntil(self.clients.claim());
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(names => 
+      Promise.all(names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n)))
+    )
+  );
+  self.clients.claim();
 });
 
-// Fetch: biarkan Streamlit lewat, cache yang lain
-self.addEventListener('fetch', function(event) {
-  // Jangan cache request ke Streamlit
+self.addEventListener('fetch', event => {
+  // Biarkan request ke Streamlit lewat langsung (tidak di-cache)
   if (event.request.url.includes('streamlit.app')) {
     return;
   }
   
   event.respondWith(
-    caches.match(event.request).then(function(response) {
-      return response || fetch(event.request);
-    })
+    caches.match(event.request).then(response => 
+      response || fetch(event.request)
+    )
   );
 });
