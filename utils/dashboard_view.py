@@ -90,7 +90,7 @@ def render_upload_section():
 def _load_data(db_path: str):
     tables = [
         "tx_tsale", "tx_tsale_card", "tx_trans",
-        "log_receipt_prn", "tx_trans_non_commerce",
+        "log_receipt_prn", "tx_trans_non_commerce", "tx_usi",
     ]
     return load_tables(db_path, tables)
 
@@ -102,6 +102,7 @@ def load_and_prepare():
         df_card = dfs.get("tx_tsale_card", pd.DataFrame())
         df_receipt = dfs.get("log_receipt_prn", pd.DataFrame())
         df_noncommerce = dfs.get("tx_trans_non_commerce", pd.DataFrame())
+        df_usi = dfs.get("tx_usi", pd.DataFrame())          # ← TAMBAH
     except Exception as e:
         st.error("Gagal load database: " + str(e))
         st.stop()
@@ -138,7 +139,7 @@ def load_and_prepare():
         if "disc" in df_noncommerce.columns:
             df_noncommerce["total_bayar"] -= df_noncommerce["disc"]
 
-    return df_sale, df_card, df_receipt, df_noncommerce, kasir_dict
+    return df_sale, df_card, df_receipt, df_noncommerce, df_usi, kasir_dict
 
 
 # ============================================================
@@ -503,7 +504,7 @@ def render_dashboard():
     if not render_upload_section():
         st.stop()
 
-    df_sale, df_card, df_receipt, df_noncommerce, kasir_dict = load_and_prepare()
+    df_sale, df_card, df_receipt, df_noncommerce, df_usi, kasir_dict = load_and_prepare()
     tgl_range = render_date_filter(df_sale)
     df, df_noncommerce = apply_filter(df_sale, df_noncommerce, tgl_range)
     st.caption(f"Menampilkan {len(df)} transaksi.")
@@ -525,7 +526,7 @@ def render_dashboard():
     render_kpi(df, df_card, df_noncommerce, tgl_range)
     render_jam_ramai(df)
     render_rekap_kasir(df, kasir_dict, noncommerce_per_kasir)
-    render_detail_member(df, kasir_dict, df_receipt)   # ← TAMBAHKAN INI
+    render_detail_member(df, kasir_dict, df_usi)   # ← TAMBAHKAN INI
 
     # Navigasi ke halaman analisis
     render_section_title("Halaman Analisis", "📂")
