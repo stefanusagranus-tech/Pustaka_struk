@@ -106,6 +106,7 @@ def load_and_prepare():
         dfs = _load_data(st.session_state["db_path"])
         df_sale = dfs.get("tx_tsale", pd.DataFrame())
         df_card = dfs.get("tx_tsale_card", pd.DataFrame())
+        df_trans = dfs.get("tx_trans", pd.DataFrame())          # ← INI YANG KURANG
         df_receipt = dfs.get("log_receipt_prn", pd.DataFrame())
         df_noncommerce = dfs.get("tx_trans_non_commerce", pd.DataFrame())
         df_usi = dfs.get("tx_usi", pd.DataFrame())
@@ -146,8 +147,15 @@ def load_and_prepare():
         if "disc" in df_noncommerce.columns:
             df_noncommerce["total_bayar"] -= df_noncommerce["disc"]
 
-    return df_sale, df_card, df_receipt, df_noncommerce, df_usi, df_trans, kasir_dict
+    # Prepare tx_trans
+    if not df_trans.empty:
+        if "date_tx" in df_trans.columns:
+            df_trans["date_tx"] = pd.to_datetime(df_trans["date_tx"], errors="coerce")
+        for c in ["price", "qty", "disc", "saving"]:
+            if c in df_trans.columns:
+                df_trans[c] = pd.to_numeric(df_trans[c], errors="coerce").fillna(0)
 
+    return df_sale, df_card, df_receipt, df_noncommerce, df_usi, df_trans, kasir_dict
 
 # ============================================================
 # Filter Tanggal
