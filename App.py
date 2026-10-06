@@ -486,7 +486,86 @@ if st.session_state.current_page == "dashboard":
 
         csv = rekap_kasir.to_csv(index=False).encode("utf-8")
         st.download_button("📥 Download Rekap Kasir (CSV)", data=csv, file_name="rekap_kasir.csv", mime="text/csv")
-
+    
+    # === DETAIL TRANSAKSI MEMBER ===
+    st.markdown("---")
+    st.subheader("👥 Detail Transaksi Member")
+    
+    if "cust_id" in df.columns:
+        # Ambil nama member dari log_receipt_prn (kalau ada)
+        # Format: "MEMBER : IRFAN *******" di kolom body1
+        def extract_member_name(faktur):
+            """Cari nama member dari log_receipt_prn berdasarkan faktur."""
+            if df_receipt.empty:
+                return "-"
+            row = df_receipt[df_receipt["bill_no"].astype(str).str.contains(
+                str(faktur).replace("119-", "").replace("119", "")[-6:], na=False
+            )]
+            if row.empty:
+                return "-"
+            body = str(row.iloc[0].get("body1", ""))
+            import re
+            m = re.search(r"MEMBER\s*:\s*([^\|\n]+)", body)
+            return m.group(1).strip() if m else "-"
+    
+        # Filter hanya transaksi member
+        df_member = df[df["is_member"] == True].copy()
+    
+        if df_member.empty:
+            st.info("Tidak ada transaksi member di rentang tanggal ini.")
+        else:
+            # Kolom yang ditampilkan
+            df_member_view = df_member[[
+                "faktur", "date_tx", "time_tx", "user_id", "cust_id",
+                "total_faktur", "total_item", "discount", "promo_disc"
+            ]].copy()
+    
+            # Tambah nama kasir
+            df_member_view["Nama Kasir"] = df_member_view["user_id"].astype(str).map(kasir_dict).fillna("-")
+    
+            # Tambah nama member (opsional, bisa lambat kalau data besar)
+            # Uncomment kalau mau:
+            # df_member_view["Nama Member"] = df_member_view["faktur"].apply(extract_member_name)
+    
+            # Rename kolom biar rapi
+            df_member_view = df_member_view.rename(columns={
+                "faktur": "Faktur",
+                "date_tx": "Tanggal",
+                "time_tx": "Jam",
+                "user_id": "NIK Kasir",
+                "cust_id": "No. Member",
+                "total_faktur": "Total",
+                "total_item": "Item",
+                "discount": "Diskon",
+                "promo_disc": "Promo",
+            })
+    
+            # Sort by tanggal & jam
+            df_member_view = df_member_view.sort_values(
+                ["Tanggal", "Jam"], ascending=[False, False]
+            ).reset_index(drop=True)
+    
+            # Metric ringkasan
+            m1, m2, m3 = st.columns(3)
+            m1.metric("🧾 Jumlah Struk Member", f"{len(df_member_view):,}")
+            m2.metric("👥 Member Unik", f"{df_member_view['No. Member'].nunique():,}")
+            m3.metric("💰 Total Sales Member", "Rp " + format(df_member_view["Total"].sum(), ",.0f"))
+    
+            # Tabel detail
+            st.dataframe(df_member_view, use_container_width=True, hide_index=True)
+    
+            # Download CSV
+            csv_member = df_member_view.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📥 Download Detail Member (CSV)",
+                data=csv_member,
+                file_name="detail_member.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+    else:
+        st.warning("Kolom `cust_id` tidak ditemukan di tx_tsale.")
+    
     # === MENU HALAMAN ANALISIS ===
     st.markdown("---")
     st.markdown("### 📂 Halaman Analisis")
