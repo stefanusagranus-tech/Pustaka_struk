@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0E1117" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Pustaka Struk" />
+  
+  <title>Pustaka Struk</title>
+  
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
+  
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("service-worker.js")
+          .then(reg => console.log("[PWA] Service Worker registered"))
+          .catch(err => console.log("[PWA] SW registration failed:", err));
+      });
+    }
+  </script>
+  
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { 
+      width: 100%; 
+      height: 100%; 
+      overflow: hidden; 
+      background-color: #0E1117;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+    /* Offline indicator */
+    #offline-banner {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      background: #F85149;
+      color: white;
+      text-align: center;
+      padding: 8px;
+      font-size: 14px;
+      z-index: 9999;
+      font-family: sans-serif;
+    }
+    body.offline #offline-banner { display: block; }
+  </style>
+</head>
+<body>
+  <div id="offline-banner">📡 Tidak ada koneksi internet</div>
+  
+  <!-- GANTI URL DI BAWAH DENGAN URL STREAMLIT-MU -->
+  <iframe 
+    src="https://pustaka-struk.streamlit.app/?embed=true&show_footer=false" 
+    title="Pustaka Struk"
+    allow="clipboard-read; clipboard-write"
+  ></iframe>
+  
+  <script>
+    window.addEventListener("online", () => document.body.classList.remove("offline"));
+    window.addEventListener("offline", () => document.body.classList.add("offline"));
+    if (!navigator.onLine) document.body.classList.add("offline");
+  </script>
+</body>
+</html>
