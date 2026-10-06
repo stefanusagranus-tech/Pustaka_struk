@@ -368,39 +368,55 @@ def render_rekap_kasir(df, kasir_dict, noncommerce_per_kasir):
 
 
 # ============================================================
-# Lookup Nama Member dari tx_usi
+# Lookup Nama Member dari tx_usi (2 jalur)
 # ============================================================
 def _build_member_lookup(df_usi):
     """
-    Bikin lookup dict dari tx_usi.
-    Return: dict {faktur: {"nama": ..., "no_member": ...}}
+    Bangun lookup nama member dari tx_usi.
+    Return 2 dict:
+      - by_faktur: {faktur: {"nama": ..., "no_member": ...}}
+      - by_no_member: {no_member: "nama"}
     """
-    lookup = {}
-    if df_usi.empty:
-        return lookup
+    by_faktur = {}
+    by_no_member = {}
 
-    required = ["faktur", "member_name"]
+    if df_usi.empty:
+        return by_faktur, by_no_member
+
+    required = ["faktur", "no_member", "member_name"]
     if not all(c in df_usi.columns for c in required):
-        return lookup
+        return by_faktur, by_no_member
 
     for _, row in df_usi.iterrows():
         faktur = str(row.get("faktur", "")).strip()
-        if not faktur or faktur == "nan":
+        no_member = str(row.get("no_member", "")).strip()
+        nama = str(row.get("member_name", "")).strip()
+
+        # Skip kalau nama kosong
+        if not nama or nama == "nan":
             continue
-        lookup[faktur] = {
-            "nama": str(row.get("member_name", "-")).strip() or "-",
-            "no_member": str(row.get("no_member", "-")).strip() or "-",
-        }
-    return lookup
+
+        # Jalur 1: by faktur
+        if faktur and faktur != "nan" and faktur not in by_faktur:
+            by_faktur[faktur] = {"nama": nama, "no_member": no_member}
+
+        # Jalur 2: by no_member
+        if no_member and no_member != "nan" and no_member not in by_no_member:
+            by_no_member[no_member] = nama
+
+    return by_faktur, by_no_member
 
 
 # ============================================================
 # Detail Transaksi Member
 # ============================================================
-def render_detail_member(df, kasir_dict, df_usi):
+def render_detail_member(df, kasir_dict, df_usi, df_trans):
     """
-    Section detail transaksi member + ranking.
-    Nama member diambil dari tx_usi.
+    Section detail transaksi member.
+    Nama member diambil dari tx_usi via 2 jalur:
+      - Jalur A: faktur (tx_tsale.faktur → tx_usi.faktur)
+      - Jalur B: no_member (tx_tsale.cust_id → tx_usi.no_member)
+      - Jalur C: tx_trans.member → tx_usi.no_member (untuk cross-check)
     """
     render_section_title("Detail Transaksi Member", "👥")
 
@@ -408,7 +424,7 @@ def render_detail_member(df, kasir_dict, df_usi):
         st.warning("Kolom `cust_id` tidak ditemukan di tx_tsale.")
         return
 
-    # Flag member
+    # Flag member di tx_tsale
     df = df.copy()
     df["is_member"] = df["cust_id"].apply(
         lambda x: str(x).strip() not in ["", "0", "0.0", "nan", "None"]
@@ -420,15 +436,10 @@ def render_detail_member(df, kasir_dict, df_usi):
         st.info("Tidak ada transaksi member di rentang tanggal ini.")
         return
 
-    # Build lookup dari tx_usi
-    member_lookup = _build_member_lookup(df_usi)
-    if not member_lookup:
-        st.warning(
-            "⚠️ Tabel `tx_usi` kosong atau kolom `faktur`/`member_name` "
-            "tidak ditemukan. Nama member tidak bisa ditampilkan."
-        )
+    # ---- Build 2 lookup dari tx_usi ----
+    lookup_faktur, lookup_no_member = _build_member_lookup(df_usi)
 
-    # Bangun view
+    # ---- Bangun view dari tx_tsale ----
     df_member_view = df_member[[
         "faktur", "date_tx", "time_tx", "user_id", "cust_id",
         "total_faktur", "total_item"
@@ -438,18 +449,60 @@ def render_detail_member(df, kasir_dict, df_usi):
         df_member_view["user_id"].astype(str).map(kasir_dict).fillna("-")
     )
 
-    # Nama member dari tx_usi
-    df_member_view["Nama Member"] = df_member_view["faktur"].astype(str).apply(
-        lambda f: member_lookup.get(f, {}).get("nama", "-")
-    )
-    df_member_view["No. Member (USI)"] = df_member_view["faktur"].astype(str).apply(
-        lambda f: member_lookup.get(f, {}).get("no_member", "")
-    )
-    df_member_view["No. Member"] = df_member_view.apply(
-        lambda r: r["No. Member (USI)"] if r["No. Member (USI)"] else r["cust_id"],
+    # ---- JALUR A: match by faktur ----
+    def get_nama_by_faktur(faktur_val):
+        return lookup_faktur.get(str(faktur_val).strip(), {}).get("nama", "")
+
+    # ---- JALUR B: match by cust_id (no_member) ----
+    def get_nama_by_cust(cust_val):
+        return lookup_no_member.get(str(cust_val).strip(), "")
+
+    # Gabungkan: prioritas faktur dulu, fallback ke cust_id
+    df_member_view["Nama Member"] = df_member_view.apply(
+        lambda r: (
+            get_nama_by_faktur(r["faktur"])          # Jalur A
+            or get_nama_by_cust(r["cust_id"])        # Jalur B (fallback)
+            or "-"
+        ),
         axis=1,
     )
 
+    # ---- JALUR C: cross-check dengan tx_trans ----
+    # Kalau nama masih "-", coba cari dari tx_trans.member
+    if not df_trans.empty and "member" in df_trans.columns and "bill_no" in df_trans.columns:
+        # Map bill_no -> member (dari tx_trans)
+        bill_to_member = (
+            df_trans[df_trans["member"].notna() & (df_trans["member"].astype(str) != "")]
+            .groupby("bill_no")["member"]
+            .first()
+            .to_dict()
+        )
+        # Map bill_no (dari faktur) ke nama via lookup_no_member
+        def get_nama_from_trans(faktur_val):
+            try:
+                bill_no = str(faktur_val).split("-")[-1]
+                bill_key = str(int(bill_no)) if bill_no.isdigit() else bill_no
+            except Exception:
+                return ""
+            member_id = bill_to_member.get(bill_key, "")
+            if not member_id:
+                return ""
+            return lookup_no_member.get(str(member_id).strip(), "")
+
+        # Isi yang masih "-" dengan jalur C
+        mask_kosong = df_member_view["Nama Member"] == "-"
+        if mask_kosong.any():
+            df_member_view.loc[mask_kosong, "Nama Member"] = (
+                df_member_view.loc[mask_kosong, "faktur"]
+                .apply(get_nama_from_trans)
+            )
+            # Kalau masih kosong, ganti ke "-"
+            df_member_view["Nama Member"] = df_member_view["Nama Member"].replace("", "-")
+
+    # ---- No. Member ----
+    df_member_view["No. Member"] = df_member_view["cust_id"].astype(str)
+
+    # ---- Rename kolom ----
     df_member_view = df_member_view.rename(columns={
         "faktur": "Faktur",
         "date_tx": "Tanggal",
@@ -464,7 +517,25 @@ def render_detail_member(df, kasir_dict, df_usi):
         "Nama Member", "No. Member", "Item", "Total"
     ]].sort_values(["Tanggal", "Jam"], ascending=[False, False]).reset_index(drop=True)
 
-    # Ringkasan
+    # ---- Debug expander ----
+    with st.expander("🔍 Debug Lookup Member", expanded=False):
+        st.write(f"Total member di tx_usi: **{len(lookup_faktur)}** (by faktur), "
+                 f"**{len(lookup_no_member)}** (by no_member)")
+        st.write(f"Total struk member di tx_tsale: **{len(df_member_view)}**")
+
+        # Hitung berapa yang dapat nama
+        dapat_nama = (df_member_view["Nama Member"] != "-").sum()
+        st.write(f"✅ Berhasil dapat nama: **{dapat_nama}** / {len(df_member_view)}")
+
+        # Preview contoh key
+        if lookup_faktur:
+            st.write("Contoh key by faktur:", list(lookup_faktur.keys())[:5])
+        if lookup_no_member:
+            st.write("Contoh key by no_member:", list(lookup_no_member.keys())[:5])
+        st.write("Contoh cust_id di transaksi:",
+                 df_member_view["No. Member"].unique()[:5].tolist())
+
+    # ---- Ringkasan ----
     total_struk = len(df_member_view)
     total_member_unik = df_member_view["No. Member"].nunique()
     total_sales = df_member_view["Total"].sum()
@@ -483,9 +554,12 @@ def render_detail_member(df, kasir_dict, df_usi):
          "sub": "rata-rata frekuensi belanja per member"},
         {"label": "Member dengan >1x Belanja",
          "value": f"{(df_member_view.groupby('No. Member').size() > 1).sum():,}"},
-    ], cols=2)
+        {"label": "Coverage Nama",
+         "value": f"{(df_member_view['Nama Member'] != '-').sum()} / {total_struk}",
+         "sub": "struk dengan nama terisi"},
+    ], cols=3)
 
-    # Ranking
+    # ---- Ranking Member ----
     render_section_title("Ranking Member Terbanyak", "🏆")
 
     ranking = (
@@ -532,14 +606,14 @@ def render_detail_member(df, kasir_dict, df_usi):
         use_container_width=True,
     )
 
-    # Detail transaksi
+    # ---- Detail Transaksi ----
     render_section_title("Detail Transaksi", "📋")
 
     col_f1, col_f2 = st.columns([2, 2])
     with col_f1:
         search = st.text_input(
             "🔎 Cari Faktur / No. Member / Nama",
-            placeholder="Contoh: 119-27090149 atau IRFAN",
+            placeholder="Contoh: 409-04109W38 atau RAIHAN",
             key="member_search",
         )
     with col_f2:
